@@ -151,12 +151,14 @@ export const CashierInventoryPage: React.FC = () => {
         purchaseFormData.invoiceNumber ? ` (فاتورة #${purchaseFormData.invoiceNumber.trim()})` : ''
       }`;
 
-const expRes = await expenseService.createExpense({
-        description: `تعبئة مخزون: ${selectedItem.name} - ${desc}`,
-        amount: total,
-        category: 'inventory',
-        date: new Date().toISOString(),
-      });
+        const expRes = await expenseService.createExpense({
+          description: `تعبئة مخزون: ${selectedItem.name} - ${desc}`,
+          amount: total,
+          category: 'inventory',
+          inventoryItemLinked: selectedItem._id,
+          inventoryQuantityAdded: qty,
+          date: new Date().toISOString(),
+        });
 
       if (expRes.success) {
         const invRes = await inventoryService.restockItem(selectedItem._id, qty);

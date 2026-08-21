@@ -21,7 +21,9 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
     const cleanLabel = typeof label === 'string' ? label.replace(/\*/g, '').trim() : label;
 
     // Show red border if there's an error, or if field is required and was touched/submitted but is empty
-    const showError = error || (isFieldRequired && (touched || isSubmitted) && !props.value);
+    const val = props.value;
+    const isEmpty = val === undefined || val === null || val === '';
+    const showError = error || (isFieldRequired && (touched || isSubmitted) && isEmpty);
 
     return (
       <div className="w-full flex flex-col gap-1 text-right">

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { productService, categoryService } from '../services/catalogService';
 import { orderService } from '../services/opsService';
+import { syncAllProductsStock } from '../utils/stockSync';
 import { Product, Category, Order } from '../types';
 import { useNotification } from '../contexts/NotificationContext';
 import { ReceiptModal } from '../components/ui/ReceiptModal';
@@ -57,6 +58,8 @@ export const CashierPOSPage: React.FC = () => {
   const loadData = async () => {
     try {
       setIsLoading(true);
+      await syncAllProductsStock().catch((e) => console.error('Initial stock sync error:', e));
+
       const [prodRes, catRes, ordRes] = await Promise.all([
         productService.listProducts(),
         categoryService.listCategories(),
