@@ -1,7 +1,8 @@
-﻿import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { inventoryService, expenseService } from '../../services/opsService';
 import { InventoryItem } from '../../types';
 import { useNotification } from '../../contexts/NotificationContext';
+import { syncProductStockAfterRestock } from '../../utils/stockSync';
 import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
@@ -162,6 +163,13 @@ const expRes = await expenseService.createExpense({
         if (invRes.success) {
           showToast(`تم توريد ${qty} ${selectedItem.unit} بنجاح وتسجيل المصروفات بقيمة ${total} ج.م`);
           setIsPurchaseModalOpen(false);
+
+          // ✅ Auto-sync product stockQuantity for all products linked to this inventory item
+          const updatedCount = await syncProductStockAfterRestock(selectedItem._id);
+          if (updatedCount > 0) {
+            showToast(`تم تحديث ${updatedCount} منتج مرتبط تلقائياً`, 'info');
+          }
+
           refetch();
         }
       }

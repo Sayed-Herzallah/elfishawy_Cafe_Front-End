@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { inventoryService } from '../../services/opsService';
 import { productService, recipeService } from '../../services/catalogService';
+import { syncProductStockAfterRestock } from '../../utils/stockSync';
 import { InventoryItem } from '../../types';
 import { useNotification } from '../../contexts/NotificationContext';
 import { formatPrice, formatNumber, formatDate } from '../../utils/formatters';
@@ -218,71 +219,10 @@ export const AdminInventoryPage: React.FC = () => {
         setRestockErrors({});
         setRestockQty('');
 
-        // ✅ Auto-sync: recalculate product stockQuantity for all products linked to this inventory item
-        try {
-          const [recipesRes, productsRes, freshInvRes] = await Promise.all([
-            recipeService.listRecipes(),
-            productService.listProducts(),
-            inventoryService.listInventory(),
-          ]);
-
-          if (recipesRes.success && recipesRes.data && productsRes.success && productsRes.data && freshInvRes.success && freshInvRes.data) {
-            const allRecipes = recipesRes.data;
-            const allProducts = productsRes.data;
-            const allInventory = freshInvRes.data;
-
-            // Find recipes that use this inventory item
-            const affectedRecipes = allRecipes.filter((recipe: any) =>
-              recipe.ingredients?.some((ing: any) => {
-                const ingId = typeof ing.inventoryItem === 'string' ? ing.inventoryItem : ing.inventoryItem?._id;
-                return ingId === selectedItem!._id;
-              })
-            );
-
-            // Helper: convert to base unit
-            const toBase = (qty: number, unit: string): number => {
-              const u = (unit || '').toUpperCase();
-              if (u === 'KG') return qty * 1000;
-              if (u === 'LITER') return qty * 1000;
-              return qty;
-            };
-
-            // For each affected recipe, recalculate available qty and update the product
-            for (const recipe of affectedRecipes) {
-              const productId = typeof recipe.product === 'string' ? recipe.product : recipe.product?._id;
-              if (!productId) continue;
-
-              let minAvailable = Infinity;
-              for (const ing of recipe.ingredients) {
-                const ingId = typeof ing.inventoryItem === 'string' ? ing.inventoryItem : ing.inventoryItem?._id;
-                const invItem = allInventory.find((i: any) => i._id === ingId);
-                if (!invItem || invItem.quantity <= 0) { minAvailable = 0; break; }
-
-                const inputQtyBase = toBase(ing.inputQuantity || 1, ing.inputUnit || 'KG');
-                const consumePerUnit = inputQtyBase / (ing.outputQuantity || 1);
-                const invBase = toBase(invItem.quantity, invItem.unit);
-                const available = consumePerUnit > 0 ? Math.floor(invBase / consumePerUnit) : Infinity;
-                minAvailable = Math.min(minAvailable, available);
-              }
-
-              const newQty = Number.isFinite(minAvailable) ? minAvailable : 0;
-
-              // Update the product's stock quantity via API
-              const productData = allProducts.find((p: any) => p._id === productId);
-              if (productData !== undefined) {
-                const fd = new FormData();
-                fd.append('stockQuantity', String(newQty));
-                fd.append('inStock', String(newQty > 0));
-                await productService.updateProduct(productId, fd);
-              }
-            }
-
-            if (affectedRecipes.length > 0) {
-              showToast(`تم تحديث ${affectedRecipes.length} منتج مرتبط بهذه الخامة تلقائياً`, 'info');
-            }
-          }
-        } catch (syncErr) {
-          console.error('Product stock sync error after restock:', syncErr);
+        // ✅ Auto-sync product stockQuantity for all products linked to this inventory item
+        const updatedCount = await syncProductStockAfterRestock(selectedItem!._id);
+        if (updatedCount > 0) {
+          showToast(`تم تحديث ${updatedCount} منتج مرتبط تلقائياً`, 'info');
         }
 
         loadInventory();
