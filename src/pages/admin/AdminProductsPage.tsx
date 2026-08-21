@@ -64,7 +64,7 @@ export const AdminProductsPage: React.FC = () => {
     stockQuantity: '',
     imageFile: null as File | null,
   });
-  const [formErrors, setFormErrors] = useState<{ name?: string; price?: string; category?: string; stockQuantity?: string; imageFile?: string }>({});
+  const [formErrors, setFormErrors] = useState<{ name?: string; description?: string; price?: string; category?: string; stockQuantity?: string; imageFile?: string }>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isFormSubmitted, setIsFormSubmitted] = useState(false);
 
@@ -374,10 +374,16 @@ export const AdminProductsPage: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsFormSubmitted(true);
-    const errors: { name?: string; price?: string; category?: string; stockQuantity?: string; imageFile?: string } = {};
+    const errors: { name?: string; description?: string; price?: string; category?: string; stockQuantity?: string; imageFile?: string } = {};
 
     if (!formData.name.trim()) {
       errors.name = 'اسم المنتج مطلوب';
+    }
+    if (!formData.description.trim()) {
+      errors.description = 'وصف المنتج مطلوب';
+    }
+    if (formData.description.trim() && formData.description.trim().length < 2) {
+      errors.description = 'يجب أن يكون الوصف حرفين على الأقل';
     }
     if (!formData.price || Number(formData.price) <= 0) {
       errors.price = 'الرجاء إدخال سعر صحيح أكبر من صفر';
@@ -1135,16 +1141,22 @@ export const AdminProductsPage: React.FC = () => {
             )}
           </div>
           <div>
-            <label className="block text-xs font-semibold text-gray-700 mb-1.5">
-              الوصف والمكونات
+            <label className={`block text-xs font-semibold mb-1.5 ${formErrors.description && isFormSubmitted ? 'text-rose-600 font-bold' : 'text-gray-700'}`}>
+              الوصف والمكونات *
             </label>
             <textarea
               rows={2}
               placeholder="وصف مختصر للمنتج يظهر في المنيو..."
               value={formData.description}
-              onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-              className="w-full bg-[#faf8f5] hover:bg-white focus:bg-white border border-gray-200 rounded-xl p-3 text-xs outline-none focus:ring-2 focus:ring-[#2e5b9f]/20 focus:border-[#2e5b9f]"
+              onChange={(e) => {
+                setFormData({ ...formData, description: e.target.value });
+                if (formErrors.description) setFormErrors({ ...formErrors, description: undefined });
+              }}
+              className={`w-full bg-[#faf8f5] hover:bg-white focus:bg-white border rounded-xl p-3 text-xs outline-none focus:ring-2 focus:ring-[#2e5b9f]/20 focus:border-[#2e5b9f] ${formErrors.description && isFormSubmitted ? 'border-rose-500 bg-rose-50/30' : 'border-gray-200'}`}
             />
+            {formErrors.description && isFormSubmitted && (
+              <p className="text-[11px] text-rose-600 font-bold mt-1">⚠️ {formErrors.description}</p>
+            )}
           </div>
 
           <div>

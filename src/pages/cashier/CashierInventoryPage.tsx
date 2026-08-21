@@ -161,19 +161,16 @@ export const CashierInventoryPage: React.FC = () => {
         });
 
       if (expRes.success) {
-        const invRes = await inventoryService.restockItem(selectedItem._id, qty);
-        if (invRes.success) {
-          showToast(`تم توريد ${qty} ${selectedItem.unit} بنجاح وتسجيل المصروفات بقيمة ${total} ج.م`);
-          setIsPurchaseModalOpen(false);
+        showToast(`تم توريد ${qty} ${selectedItem.unit} بنجاح وتسجيل المصروفات بقيمة ${total} ج.م`);
+        setIsPurchaseModalOpen(false);
 
-          // ✅ Auto-sync product stockQuantity for all products linked to this inventory item
-          const updatedCount = await syncProductStockAfterRestock(selectedItem._id);
-          if (updatedCount > 0) {
-            showToast(`تم تحديث ${updatedCount} منتج مرتبط تلقائياً`, 'info');
-          }
-
-          refetch();
+        // ✅ Auto-sync product stockQuantity for all products linked to this inventory item
+        const updatedCount = await syncProductStockAfterRestock(selectedItem._id);
+        if (updatedCount > 0) {
+          showToast(`تم تحديث ${updatedCount} منتج مرتبط تلقائياً`, 'info');
         }
+
+        refetch();
       }
     } catch (err) {
       showError(err);

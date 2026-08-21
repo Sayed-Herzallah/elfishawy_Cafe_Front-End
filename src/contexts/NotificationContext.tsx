@@ -35,52 +35,7 @@ export const NotificationProvider: React.FC<{ children: ReactNode }> = ({ childr
 
   // Map common English/backend error messages to Arabic
   const translateError = (rawMsg: string): string => {
-    const errorMap: Record<string, string> = {
-      // Network / Server
-      'Failed to fetch': 'تعذر الاتصال بالخادم، تحقق من اتصالك بالإنترنت',
-      'Network Error': 'خطأ في الشبكة، تحقق من اتصالك بالإنترنت',
-      'Internal Server Error': 'خطأ داخلي في الخادم، يرجى المحاولة لاحقاً',
-      'Service Unavailable': 'الخدمة غير متاحة حالياً، يرجى المحاولة لاحقاً',
-      'Gateway Timeout': 'انتهى وقت الاستجابة، يرجى المحاولة مجدداً',
-      'Bad Gateway': 'خطأ في البوابة، يرجى المحاولة لاحقاً',
-      'Request Timeout': 'انتهت مهلة الطلب، يرجى المحاولة مجدداً',
-      // Auth
-      'Unauthorized': 'غير مصرح لك، يرجى تسجيل الدخول',
-      'Forbidden': 'ليس لديك صلاحية للوصول',
-      'Invalid credentials': 'اسم المستخدم أو كلمة المرور غير صحيحة',
-      'Invalid password': 'كلمة المرور غير صحيحة',
-      'User not found': 'المستخدم غير موجود',
-      'Token expired': 'انتهت صلاحية الجلسة، يرجى تسجيل الدخول مجدداً',
-      'jwt expired': 'انتهت صلاحية الجلسة، يرجى تسجيل الدخول مجدداً',
-      'jwt malformed': 'جلسة غير صالحة، يرجى تسجيل الدخول مجدداً',
-      // Validation
-      'Validation failed': 'بيانات غير صحيحة، يرجى مراجعة الحقول',
-      'is required': 'هذا الحقل مطلوب',
-      'must be unique': 'هذا الاسم مستخدم مسبقاً',
-      'already exists': 'هذا العنصر موجود مسبقاً',
-      'duplicate key': 'هذا العنصر موجود مسبقاً',
-      'Duplicate entry': 'إدخال مكرر، هذا العنصر موجود بالفعل',
-      'Not Found': 'العنصر المطلوب غير موجود',
-      'not found': 'العنصر المطلوب غير موجود',
-      // Specific app errors
-      'Insufficient stock': 'الكمية المتاحة في المخزون غير كافية',
-      'insufficient stock': 'الكمية المتاحة في المخزون غير كافية',
-      'Cannot delete': 'لا يمكن الحذف، قد يكون هذا العنصر مرتبطاً ببيانات أخرى',
-      'Cannot update': 'لا يمكن التحديث في الوقت الحالي',
-    };
-
-    // Try direct match
-    for (const [key, arabic] of Object.entries(errorMap)) {
-      if (rawMsg.toLowerCase().includes(key.toLowerCase())) {
-        return arabic;
-      }
-    }
-
-    // If the message already contains Arabic chars, return as-is
-    if (/[\u0600-\u06FF]/.test(rawMsg)) return rawMsg;
-
-    // Otherwise return generic
-    return 'حدث خطأ، يرجى المحاولة مجدداً';
+    return rawMsg;
   };
 
   const showError = useCallback((error: any) => {
