@@ -1,0 +1,8 @@
+{
+  "name": "Elfishawy Cafe - Espresso & Ledger",
+  "description": "Production-ready POS, Inventory, Menu, and Financial Management System for Elfishawy Cafe.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

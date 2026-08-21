@@ -1,0 +1,254 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --font-cairo: 'Cairo', system-ui, -apple-system, sans-serif;
+    --font-amiri: 'Amiri', serif;
+    --font-tajawal: 'Tajawal', sans-serif;
+  }
+
+  body {
+    font-family: var(--font-cairo);
+  }
+
+  h1, h2, h3, .font-arabic-heading {
+    font-family: var(--font-cairo);
+  }
+
+  .font-calligraphy {
+    font-family: var(--font-amiri);
+  }
+}
+
+/* Global Input validation & Focus styles */
+input:focus, select:focus, textarea:focus {
+  outline: none !important;
+  border-color: #dc2626 !important; /* Red color on focus/click */
+  box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.25) !important;
+}
+
+/* Highlight required empty inputs */
+input[required].touched:invalid,
+select[required].touched:invalid {
+  border-color: #dc2626 !important;
+  background-color: #fef2f2 !important;
+}
+
+/* Responsive Scroll Fixes */
+@media (max-width: 1024px) {
+  .overflow-x-auto {
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+  }
+  
+  /* Card grid responsive */
+  .card-grid-responsive {
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  }
+  
+  /* Table responsive */
+  .table-responsive {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  
+  .table-responsive table {
+    min-width: 600px;
+  }
+}
+
+/* Professional Card Styles */
+.professional-card {
+  @apply bg-white border border-gray-100/80 rounded-2xl shadow-xs hover:shadow-md transition-all duration-200 cursor-pointer border-l-4;
+}
+
+.professional-card:hover {
+  @apply shadow-md transform -translate-y-0.5;
+}
+
+.professional-card.selected {
+  @apply ring-2 ring-[#2e5b9f]/20 bg-[#faf8f5];
+}
+
+/* Print Styles */
+@media print {
+  /* Avoid extra blank page issue */
+  @page {
+    size: auto;
+    margin: 4mm;
+  }
+
+  html, body {
+    height: auto !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    background: white !important;
+    color: black !important;
+  }
+
+  /* KEY FIX for "more than one page":
+     Hidden non-print elements are collapsed to zero height so they
+     can never extend the printed sheet into extra (blank) pages. */
+  body:has(#printable-receipt) * {
+    visibility: hidden !important;
+    height: 0 !important;
+    min-height: 0 !important;
+    max-height: 0 !important;
+  }
+  body:has(#printable-receipt) #printable-receipt,
+  body:has(#printable-receipt) #printable-receipt * {
+    visibility: visible !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+  }
+
+  body:has(#printable-receipt) #printable-receipt {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 80mm;
+    margin: 0;
+    padding: 10px;
+    background: white !important;
+    color: black !important;
+    box-shadow: none !important;
+    border: none !important;
+    page-break-inside: avoid;
+    page-break-after: avoid;
+  }
+
+  /* Reports/Financial Reports print mode */
+  body:has(.print-report) * {
+    visibility: hidden !important;
+    height: 0 !important;
+    min-height: 0 !important;
+    max-height: 0 !important;
+  }
+  body:has(.print-report) .print-report,
+  body:has(.print-report) .print-report * {
+    visibility: visible !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+  }
+
+  body:has(.print-report) .print-report {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    max-width: 100%;
+    margin: 0;
+    padding: 20px;
+    background: white !important;
+    color: black !important;
+    box-shadow: none !important;
+    border: none !important;
+  }
+
+  /* Non-receipt mode (e.g. printing reports, logs, lists): Hide navigation, actions, sidebars and buttons */
+  body:not(:has(#printable-receipt)):not(:has(.print-report)) .no-print,
+  body:not(:has(#printable-receipt)):not(:has(.print-report)) button,
+  body:not(:has(#printable-receipt)):not(:has(.print-report)) .sidebar,
+  body:not(:has(#printable-receipt)):not(:has(.print-report)) header,
+  body:not(:has(#printable-receipt)):not(:has(.print-report)) nav,
+  body:not(:has(#printable-receipt)):not(:has(.print-report)) .filter-section,
+  body:not(:has(#printable-receipt)):not(:has(.print-report)) .action-buttons,
+  body:not(:has(#printable-receipt)):not(:has(.print-report)) [class*="sticky"],
+  body:not(:has(#printable-receipt)):not(:has(.print-report)) .fixed {
+    display: none !important;
+  }
+
+  /* Table splitting fixes */
+  table {
+    page-break-inside: auto;
+  }
+  tr {
+    page-break-inside: avoid;
+    page-break-after: auto;
+  }
+  thead {
+    display: table-header-group;
+  }
+  tfoot {
+    display: table-footer-group;
+  }
+
+  /* Professional Card Print Styles */
+  .professional-card {
+    break-inside: avoid;
+    page-break-inside: avoid;
+    border: 1px solid #e5e7eb !important;
+    box-shadow: none !important;
+    background: white !important;
+  }
+  
+  .professional-card .no-print {
+    display: none !important;
+  }
+
+  /* Ensure proper margins and no blank pages */
+  .print-report {
+    page-break-after: avoid;
+  }
+  .print-report .page-break {
+    page-break-before: always;
+  }
+
+  body:not(:has(#printable-receipt)):not(:has(.print-report)) {
+    visibility: visible;
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #f1f1f1;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Card Grid Utilities */
+.card-grid {
+  @apply grid gap-4;
+}
+.card-grid-1 { @apply grid-cols-1; }
+.card-grid-2 { @apply grid-cols-1 sm:grid-cols-2; }
+.card-grid-3 { @apply grid-cols-1 sm:grid-cols-2 lg:grid-cols-3; }
+.card-grid-4 { @apply grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4; }
+
+/* Card List */
+.card-list {
+  @apply space-y-3;
+}
+.card-list > * + * {
+  @apply border-t border-gray-100 pt-4;
+}
+
+/* Animation utilities */
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in {
+  animation: fade-in 0.2s ease-out;
+}
+
+@keyframes slide-in-right {
+  from { opacity: 0; transform: translateX(20px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+.animate-slide-in-right {
+  animation: slide-in-right 0.2s ease-out;
+}

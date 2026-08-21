@@ -1,0 +1,595 @@
+﻿import React, { useState, useEffect } from 'react';
+import { inventoryService, expenseService } from '../../services/opsService';
+import { InventoryItem } from '../../types';
+import { useNotification } from '../../contexts/NotificationContext';
+import { Modal } from '../../components/ui/Modal';
+import { Button } from '../../components/ui/Button';
+import { Input } from '../../components/ui/Input';
+import { Select } from '../../components/ui/Select';
+import { Badge } from '../../components/ui/Badge';
+import { LoadingSkeleton } from '../../components/ui/LoadingSkeleton';
+import { useInventorySync } from '../../hooks/useInventorySync';
+import { formatPrice, formatNumber, formatDate } from '../../utils/formatters';
+import {
+  Plus,
+  ArrowDownToLine,
+  Search,
+  SearchX,
+  AlertTriangle,
+  ShoppingBag,
+  CheckCircle2,
+  Bell,
+} from 'lucide-react';
+
+export const CashierInventoryPage: React.FC = () => {
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [filterMode, setFilterMode] = useState<'all' | 'low' | 'out'>('all');
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+
+  // Modals
+  const [isPurchaseModalOpen, setIsPurchaseModalOpen] = useState<boolean>(false);
+  const [isAddModalOpen, setIsAddModalOpen] = useState<boolean>(false);
+  const [selectedItem, setSelectedItem] = useState<InventoryItem | null>(null);
+
+  // Add Item Form Data
+  const [formData, setFormData] = useState({ name: '', quantity: '10', unit: 'KG', minLimit: '5' });
+  const [formErrors, setFormErrors] = useState<{ name?: string; quantity?: string; minLimit?: string }>({});
+
+  // Purchase/Restock Form Data (Linked to real backend expenses)
+  const [purchaseFormData, setPurchaseFormData] = useState({
+    quantity: '10',
+    unitCost: '',
+    totalAmount: '',
+    supplierName: '',
+    invoiceNumber: '',
+  });
+
+  // Form Error States
+  const [purchaseErrors, setPurchaseErrors] = useState<{ quantity?: string; totalAmount?: string }>({});
+
+  const { showToast, showError } = useNotification();
+
+  // Use inventory sync hook with real-time polling
+  const { items, lowStockItems, outOfStockItems, isLoading, refetch } = useInventorySync(30000);
+
+  // Computed values from hook data
+  const lowStockCount = lowStockItems.length;
+  const outOfStockCount = outOfStockItems.length;
+  const healthyCount = items.filter(i => i.quantity > i.minLimit).length;
+
+  // Handle Add new Inventory Item
+  const handleCreateItem = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const errors: { name?: string; quantity?: string; minLimit?: string } = {};
+
+    if (!formData.name.trim()) {
+      errors.name = 'اسم الصنف مطلوب';
+    }
+    if (formData.quantity === '' || Number(formData.quantity) < 0) {
+      errors.quantity = 'الرجاء إدخال كمية صحيحة';
+    }
+    if (formData.minLimit === '' || Number(formData.minLimit) < 1) {
+      errors.minLimit = 'الرجاء تحديد حد أدنى صحيح (1 أو أكثر)';
+    }
+
+    if (Object.keys(errors).length > 0) {
+      setFormErrors(errors);
+      showToast('الرجاء تصحيح الحقول المميزة باللون الأحمر', 'error');
+      return;
+    }
+
+    setFormErrors({});
+
+    try {
+      setIsSubmitting(true);
+      const res = await inventoryService.createItem({
+        name: formData.name.trim(),
+        quantity: Number(formData.quantity) || 0,
+        unit: formData.unit,
+        minLimit: Number(formData.minLimit) || 5,
+      });
+
+      if (res.success) {
+        showToast('تمت إضافة صنف المخزون بنجاح');
+        setIsAddModalOpen(false);
+        setFormData({ name: '', quantity: '10', unit: 'KG', minLimit: '5' });
+        refetch();
+      }
+    } catch (err) {
+      showError(err);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Handle Purchase & Restock via Backend Expense Service
+  const handleOpenPurchaseModal = (item: InventoryItem) => {
+    setSelectedItem(item);
+    setPurchaseErrors({});
+    const initialUnitCost = item.costPrice ? String(item.costPrice) : '150';
+    const initialQty = '10';
+    const initialTotal = String((Number(initialUnitCost) || 0) * (Number(initialQty) || 0));
+    setPurchaseFormData({
+      quantity: initialQty,
+      unitCost: initialUnitCost,
+      totalAmount: initialTotal,
+      supplierName: '',
+      invoiceNumber: '',
+    });
+    setIsPurchaseModalOpen(true);
+  };
+
+  const handlePurchaseSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedItem) return;
+
+    const errors: { quantity?: string; totalAmount?: string } = {};
+    const qty = Number(purchaseFormData.quantity);
+    const total = Number(purchaseFormData.totalAmount);
+
+    if (!purchaseFormData.quantity || isNaN(qty) || qty <= 0) {
+      errors.quantity = 'الكمية المشتراة مطلوبة ويجب أن تكون أكبر من صفر';
+    }
+    if (!purchaseFormData.totalAmount || isNaN(total) || total <= 0) {
+      errors.totalAmount = 'المبلغ الإجمالي مطلوب ويجب أن يكون أكبر من صفر';
+    }
+
+    if (Object.keys(errors).length > 0) {
+      setPurchaseErrors(errors);
+      showToast('الرجاء تصحيح بيانات الشراء المميزة بالأحمر', 'error');
+      return;
+    }
+
+    setPurchaseErrors({});
+
+    try {
+      setIsSubmitting(true);
+      const desc = `[شراء بضاعة] ${selectedItem.name} - كمية: ${qty} ${selectedItem.unit}${
+        purchaseFormData.supplierName ? ` (مورد: ${purchaseFormData.supplierName.trim()})` : ''
+      }${
+        purchaseFormData.invoiceNumber ? ` (فاتورة #${purchaseFormData.invoiceNumber.trim()})` : ''
+      }`;
+
+const expRes = await expenseService.createExpense({
+        description: `تعبئة مخزون: ${selectedItem.name} - ${desc}`,
+        amount: total,
+        category: 'inventory',
+        date: new Date().toISOString(),
+      });
+
+      if (expRes.success) {
+        const invRes = await inventoryService.restockItem(selectedItem._id, qty);
+        if (invRes.success) {
+          showToast(`تم توريد ${qty} ${selectedItem.unit} بنجاح وتسجيل المصروفات بقيمة ${total} ج.م`);
+          setIsPurchaseModalOpen(false);
+          refetch();
+        }
+      }
+    } catch (err) {
+      showError(err);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const filteredItems = items.filter((item) => {
+    const matchesSearch = item.name.toLowerCase().includes(searchQuery.trim().toLowerCase());
+    if (filterMode === 'low') return matchesSearch && item.quantity > 0 && item.quantity <= item.minLimit;
+    if (filterMode === 'out') return matchesSearch && item.quantity <= 0;
+    return matchesSearch;
+  });
+
+  return (
+    <div className="space-y-5 text-right font-sans">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-gray-200/70">
+        <div>
+          <h1 className="text-lg font-bold font-arabic-heading text-gray-900">
+            مخزون المواد الخام والمشتريات
+          </h1>
+          <p className="text-xs text-gray-500 mt-0.5">
+            عرض الخامات المستودعية، تسجيل المشتريات المباشرة، وزيادة الأرصدة.
+          </p>
+        </div>
+
+        <Button
+          onClick={() => {
+            setFormErrors({});
+            setIsAddModalOpen(true);
+          }}
+          variant="primary"
+          leftIcon={<Plus className="w-4 h-4 ml-1.5" />}
+          className="bg-[#2e5b9f] hover:bg-[#244b85]"
+        >
+          إضافة صنف مخزون
+        </Button>
+      </div>
+
+      {/* Metric Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+        <div
+          onClick={() => setFilterMode('all')}
+          className={`bg-white rounded-2xl border p-4 transition cursor-pointer shadow-2xs ${
+            filterMode === 'all'
+              ? 'border-[#2e5b9f] ring-1 ring-[#2e5b9f]/20'
+              : 'border-gray-200/80 hover:border-gray-300'
+          }`}
+        >
+          <div className="flex items-center justify-between">
+            <Plus className="w-4 h-4 text-gray-500" />
+            <span className="text-xs text-gray-500 font-bold">إجمالي الخامات</span>
+          </div>
+          <span className="text-xl font-bold text-gray-900 font-mono mt-1 block">
+            {formatNumber(items.length)} صنف
+          </span>
+          <span className="text-[11px] text-emerald-700 mt-0.5 block">
+            {formatNumber(healthyCount)} صنف بحالة ممتازة
+          </span>
+        </div>
+
+        <div
+          onClick={() => setFilterMode('low')}
+          className={`rounded-2xl border p-4 transition cursor-pointer shadow-2xs ${
+            filterMode === 'low'
+              ? 'bg-amber-50 border-amber-400 ring-1 ring-amber-400/20'
+              : 'bg-white border-gray-200/80 hover:bg-amber-50/40'
+          }`}
+        >
+          <div className="flex items-center justify-between">
+            <AlertTriangle className="w-4 h-4 text-amber-600" />
+            <span className="text-xs text-amber-900 font-bold">مخزون منخفض</span>
+          </div>
+          <span className="text-xl font-bold text-amber-900 font-mono mt-1 block">
+            {formatNumber(lowStockCount)} خامات
+          </span>
+          <span className="text-[11px] text-amber-800 mt-0.5 block">
+            يحتاج إلى تسجيل شراء
+          </span>
+        </div>
+
+        <div
+          onClick={() => setFilterMode('out')}
+          className={`rounded-2xl border p-4 transition cursor-pointer shadow-2xs ${
+            filterMode === 'out'
+              ? 'bg-rose-50 border-rose-400 ring-1 ring-rose-400/20'
+              : 'bg-white border-gray-200/80 hover:bg-rose-50/40'
+          }`}
+        >
+          <div className="flex items-center justify-between">
+            <AlertTriangle className="w-4 h-4 text-rose-600" />
+            <span className="text-xs text-rose-900 font-bold">خامات نافدة</span>
+          </div>
+          <span className="text-xl font-bold text-rose-900 font-mono mt-1 block">
+            {formatNumber(outOfStockCount)} خامات
+          </span>
+          <span className="text-[11px] text-rose-800 mt-0.5 block">
+            يتطلب شراء فوري
+          </span>
+        </div>
+      </div>
+
+      {/* Stock Table */}
+      <div className="bg-white rounded-2xl border border-gray-200/80 shadow-2xs p-5 space-y-3.5">
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pb-2 border-b border-gray-100">
+          <div className="relative w-full sm:w-72">
+            <Search className="w-3.5 h-3.5 text-gray-400 absolute right-3.5 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              placeholder="ابحث في الخامات والمواد — مثال: بن، سكر، أكواب"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full bg-[#faf8f5] border border-gray-200 rounded-xl pr-9 pl-3 py-2 text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-[#2e5b9f]"
+            />
+          </div>
+
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => setFilterMode('all')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                filterMode === 'all'
+                  ? 'bg-[#2e5b9f] text-white shadow-2xs'
+                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              }`}
+            >
+              الكل ({items.length})
+            </button>
+            <button
+              onClick={() => setFilterMode('low')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                filterMode === 'low'
+                  ? 'bg-amber-600 text-white shadow-2xs'
+                  : 'bg-amber-50 text-amber-800 hover:bg-amber-100'
+              }`}
+            >
+              المنخفض ({lowStockCount})
+            </button>
+            <button
+              onClick={() => setFilterMode('out')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                filterMode === 'out'
+                  ? 'bg-rose-600 text-white shadow-2xs'
+                  : 'bg-rose-50 text-rose-800 hover:bg-rose-100'
+              }`}
+            >
+              النافد ({outOfStockCount})
+            </button>
+          </div>
+        </div>
+
+        {isLoading ? (
+          <LoadingSkeleton type="table" count={5} />
+        ) : filteredItems.length === 0 ? (
+          <div className="text-center py-12 bg-white border border-dashed border-gray-200 rounded-2xl text-gray-400">
+            <div className="w-14 h-14 rounded-2xl bg-[#2e5b9f]/5 border border-[#2e5b9f]/15 flex items-center justify-center text-[#2e5b9f] mx-auto mb-3">
+              <SearchX className="w-6 h-6" />
+            </div>
+            <p className="text-gray-600 font-bold text-sm">لا توجد أصناف خامات مطابقة</p>
+            <p className="text-xs text-gray-500 mt-2">جرّب كلمة بحث أخرى أو امسح الفلاتر لعرض كل الأصناف.</p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-right border-collapse text-xs">
+              <thead>
+                <tr className="border-b border-gray-100 text-gray-400 font-semibold">
+                  <th className="pb-3 px-3">اسم المادة الخام</th>
+                  <th className="pb-3 px-3">الرصيد المتاح</th>
+                  <th className="pb-3 px-3">سعر التكلفة</th>
+                  <th className="pb-3 px-3">حد الأمان الأدنى</th>
+                  <th className="pb-3 px-3">آخر توريد</th>
+                  <th className="pb-3 px-3">الحالة التشغيلية</th>
+                  <th className="pb-3 px-3 text-left">شراء وتوريد</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100 text-gray-800">
+                {filteredItems.map((item) => {
+                  const isOut = item.quantity <= 0;
+                  const isLow = !isOut && item.quantity <= item.minLimit;
+
+                  return (
+                    <tr key={item._id} className="hover:bg-[#faf8f5]/80 transition">
+                      <td className="py-3 px-3 font-bold text-gray-900 text-xs">
+                        {item.name}
+                      </td>
+
+                      <td className="py-3 px-3">
+                        <span
+                          className={`font-bold font-mono text-xs ${
+                            isOut
+                              ? 'text-rose-600'
+                              : isLow
+                              ? 'text-amber-800'
+                              : 'text-gray-900'
+                          }`}
+                        >
+                          {formatNumber(item.quantity)} {item.unit}
+                        </span>
+                      </td>
+
+                      <td className="py-3 px-3 font-mono text-xs text-gray-600">
+                        {item.costPrice ? `${formatPrice(item.costPrice)} / ${item.unit}` : '—'}
+                      </td>
+
+                      <td className="py-3 px-3 font-mono text-xs text-gray-500">
+                        {formatNumber(item.minLimit)} {item.unit}
+                      </td>
+
+                      <td className="py-3 px-3 font-mono text-xs text-gray-500">
+                        {formatDate(item.lastRestocked) || '—'}
+                      </td>
+
+                      <td className="py-3 px-3">
+                        {isOut ? (
+                          <Badge variant="out" size="sm">
+                            نافد من المخزن
+                          </Badge>
+                        ) : isLow ? (
+                          <Badge variant="low" size="sm">
+                            منخفض (اطلب توريد)
+                          </Badge>
+                        ) : (
+                          <Badge variant="available" size="sm">
+                            متوفر ومستقر
+                          </Badge>
+                        )}
+                      </td>
+
+                      <td className="py-3 px-3 text-left">
+                        <button
+                          onClick={() => handleOpenPurchaseModal(item)}
+                          className="inline-flex items-center gap-1.5 py-1.5 px-3 rounded-lg bg-blue-50 hover:bg-blue-100 text-[#2e5b9f] text-xs font-bold transition shadow-2xs cursor-pointer border border-blue-100"
+                        >
+                          <ShoppingBag className="w-3.5 h-3.5" />
+                          <span>شراء وتوريد</span>
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Modal: Add New Inventory Item */}
+      <Modal
+        isOpen={isAddModalOpen}
+        onClose={() => setIsAddModalOpen(false)}
+        title="إضافة صنف مخزون جديد"
+        maxWidth="md"
+      >
+        <form noValidate onSubmit={handleCreateItem} className="space-y-4 text-right font-sans">
+          <Input
+            label="اسم المادة الخام / الصنف *"
+            placeholder="مثال: بن برازيلي، حليب كامل الدسم"
+            value={formData.name}
+            onChange={(e) => {
+              setFormData({ ...formData, name: e.target.value });
+              if (formErrors.name) setFormErrors({ ...formErrors, name: undefined });
+            }}
+            error={formErrors.name}
+            required
+          />
+
+          <div className="grid grid-cols-2 gap-3">
+            <Input
+              label="الكمية الافتتاحية الحالية *"
+              type="number"
+              min="0"
+              placeholder="10"
+              value={formData.quantity}
+              onChange={(e) => {
+                setFormData({ ...formData, quantity: e.target.value });
+                if (formErrors.quantity) setFormErrors({ ...formErrors, quantity: undefined });
+              }}
+              error={formErrors.quantity}
+              required
+            />
+
+            <Select
+              label="وحدة القياس *"
+              value={formData.unit}
+              onChange={(e) => setFormData({ ...formData, unit: e.target.value })}
+              options={[
+                { value: 'KG', label: 'كيلو جرام (KG)' },
+                { value: 'GRAM', label: 'جرام (GRAM)' },
+                { value: 'LITER', label: 'لتر (LITER)' },
+                { value: 'ML', label: 'ملي لتر (ML)' },
+                { value: 'PIECE', label: 'قطعة / عبوة (PIECE)' },
+              ]}
+            />
+          </div>
+
+          <Input
+            label="حد الأمان الأدنى للتنبيه *"
+            type="number"
+            min="1"
+            placeholder="5"
+            value={formData.minLimit}
+            onChange={(e) => {
+              setFormData({ ...formData, minLimit: e.target.value });
+              if (formErrors.minLimit) setFormErrors({ ...formErrors, minLimit: undefined });
+            }}
+            error={formErrors.minLimit}
+            required
+          />
+
+          <div className="pt-3 flex items-center justify-end gap-2 border-t border-gray-100">
+            <Button type="button" variant="outline" onClick={() => setIsAddModalOpen(false)}>
+              إلغاء
+            </Button>
+            <Button
+              type="submit"
+              variant="primary"
+              isLoading={isSubmitting}
+              className="bg-[#2e5b9f] hover:bg-[#244b85] py-2 px-5 rounded-xl text-xs font-bold"
+            >
+              إضافة الصنف
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Modal: Purchase and Restock Item */}
+      <Modal
+        isOpen={isPurchaseModalOpen}
+        onClose={() => setIsPurchaseModalOpen(false)}
+        title={selectedItem ? `تسجيل شراء وتوريد لـ (${selectedItem.name})` : 'شراء وتوريد'}
+        maxWidth="md"
+      >
+        <form noValidate onSubmit={handlePurchaseSubmit} className="space-y-4 text-right font-sans">
+          <div className="p-3 bg-blue-50/70 border border-blue-100 rounded-xl text-xs text-gray-700">
+            الرصيد الحالي بالمخزن: <span className="font-bold font-mono text-[#2e5b9f]">{selectedItem?.quantity} {selectedItem?.unit}</span>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <Input
+              label={`الكمية المشتراة (${selectedItem?.unit || 'وحدة'}) *`}
+              type="number"
+              min="0.1"
+              step="any"
+              placeholder="10"
+              value={purchaseFormData.quantity}
+              onChange={(e) => {
+                const q = e.target.value;
+                const cost = parseFloat(purchaseFormData.unitCost) || 0;
+                const qtyNum = parseFloat(q) || 0;
+                setPurchaseFormData({
+                  ...purchaseFormData,
+                  quantity: q,
+                  totalAmount: cost > 0 && qtyNum > 0 ? String((cost * qtyNum).toFixed(0)) : purchaseFormData.totalAmount,
+                });
+                if (purchaseErrors.quantity) setPurchaseErrors({ ...purchaseErrors, quantity: undefined });
+              }}
+              error={purchaseErrors.quantity}
+              required
+            />
+
+            <Input
+              label="سعر تكلفة الوحدة (ج.م)"
+              type="number"
+              min="0.1"
+              step="any"
+              placeholder="150"
+              value={purchaseFormData.unitCost}
+              onChange={(e) => {
+                const uCost = e.target.value;
+                const costNum = parseFloat(uCost) || 0;
+                const qtyNum = parseFloat(purchaseFormData.quantity) || 0;
+                setPurchaseFormData({
+                  ...purchaseFormData,
+                  unitCost: uCost,
+                  totalAmount: costNum > 0 && qtyNum > 0 ? String((costNum * qtyNum).toFixed(0)) : purchaseFormData.totalAmount,
+                });
+              }}
+            />
+          </div>
+
+          <Input
+            label="المبلغ الإجمالي لفاتورة الشراء (ج.م) *"
+            type="number"
+            min="1"
+            placeholder="الإجمالي"
+            value={purchaseFormData.totalAmount}
+            onChange={(e) => {
+              setPurchaseFormData({ ...purchaseFormData, totalAmount: e.target.value });
+              if (purchaseErrors.totalAmount) setPurchaseErrors({ ...purchaseErrors, totalAmount: undefined });
+            }}
+            error={purchaseErrors.totalAmount}
+            required
+          />
+
+          <div className="grid grid-cols-2 gap-3">
+            <Input
+              label="اسم المورد (اختياري)"
+              placeholder="مثال: شركة النصر"
+              value={purchaseFormData.supplierName}
+              onChange={(e) => setPurchaseFormData({ ...purchaseFormData, supplierName: e.target.value })}
+            />
+
+            <Input
+              label="رقم الفاتورة الورقية"
+              placeholder="مثال: #108"
+              value={purchaseFormData.invoiceNumber}
+              onChange={(e) => setPurchaseFormData({ ...purchaseFormData, invoiceNumber: e.target.value })}
+            />
+          </div>
+
+          <div className="pt-3 flex items-center justify-end gap-2 border-t border-gray-100">
+            <Button type="button" variant="outline" onClick={() => setIsPurchaseModalOpen(false)}>
+              إلغاء
+            </Button>
+            <Button
+              type="submit"
+              variant="primary"
+              isLoading={isSubmitting}
+              className="bg-[#2e5b9f] hover:bg-[#244b85] py-2 px-5 rounded-xl text-xs font-bold"
+            >
+              تسجيل الشراء وزيادة الرصيد
+            </Button>
+          </div>
+        </form>
+      </Modal>
+    </div>
+  );
+};
