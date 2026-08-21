@@ -80,6 +80,26 @@ export const CashierPOSPage: React.FC = () => {
 
   useEffect(() => {
     loadData();
+
+    // Poll for updates silently every 8 seconds so restocks and order updates reflect quickly
+    const interval = setInterval(async () => {
+      try {
+        const [prodRes, ordRes] = await Promise.all([
+          productService.listProducts(),
+          orderService.getOrders(),
+        ]);
+        if (prodRes.success && prodRes.data) setProducts(prodRes.data);
+        if (ordRes.success && ordRes.data) {
+          const completedOrders = ordRes.data.filter((o: Order) => o.status === 'completed');
+          setAllOrders(completedOrders);
+          setRecentOrders(completedOrders.slice(0, 4));
+        }
+      } catch (err) {
+        console.error('Silent POS data refresh error:', err);
+      }
+    }, 8000);
+
+    return () => clearInterval(interval);
   }, []);
 
   const handleAddToCart = (product: Product) => {
