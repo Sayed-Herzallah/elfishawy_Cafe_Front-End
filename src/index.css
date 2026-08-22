@@ -70,136 +70,67 @@ select[required].touched:invalid {
   @apply ring-2 ring-[#2e5b9f]/20 bg-[#faf8f5];
 }
 
-/* Print Styles */
+/* Print Styles — visibility approach works regardless of DOM nesting depth */
 @media print {
-  /* Avoid extra blank page issue */
   @page {
-    size: auto;
-    margin: 4mm;
+    size: 80mm auto;
+    margin: 0;
   }
 
   html, body {
     height: auto !important;
-    min-height: 0 !important;
-    margin: 0 !important;
-    padding: 0 !important;
     overflow: visible !important;
-    background: white !important;
-    color: black !important;
+    background: #ffffff !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
   }
 
-  /* KEY FIX for "more than one page":
-     Hidden non-print elements are collapsed to zero height so they
-     can never extend the printed sheet into extra (blank) pages. */
-  body:has(#printable-receipt) * {
+  /* Step 1: Hide everything in the body */
+  body * {
     visibility: hidden !important;
-    height: 0 !important;
-    min-height: 0 !important;
-    max-height: 0 !important;
   }
-  body:has(#printable-receipt) #printable-receipt,
-  body:has(#printable-receipt) #printable-receipt * {
+
+  /* Step 2: Show ONLY the printable receipt and all its children */
+  #printable-receipt,
+  #printable-receipt * {
     visibility: visible !important;
-    height: auto !important;
-    min-height: 0 !important;
-    max-height: none !important;
   }
 
-  body:has(#printable-receipt) #printable-receipt {
-    position: absolute;
-    left: 0;
-    top: 0;
-    width: 80mm;
-    margin: 0;
-    padding: 10px;
-    background: white !important;
-    color: black !important;
-    box-shadow: none !important;
-    border: none !important;
-    page-break-inside: avoid;
-    page-break-after: avoid;
-  }
-
-  /* Reports/Financial Reports print mode */
-  body:has(.print-report) * {
-    visibility: hidden !important;
-    height: 0 !important;
-    min-height: 0 !important;
-    max-height: 0 !important;
-  }
-  body:has(.print-report) .print-report,
-  body:has(.print-report) .print-report * {
-    visibility: visible !important;
-    height: auto !important;
-    min-height: 0 !important;
-    max-height: none !important;
-  }
-
-  body:has(.print-report) .print-report {
-    position: absolute;
-    left: 0;
-    top: 0;
-    width: 100%;
-    max-width: 100%;
-    margin: 0;
-    padding: 20px;
-    background: white !important;
-    color: black !important;
+  /* Step 3: Position the receipt at top-left of the page */
+  #printable-receipt {
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    width: 80mm !important;
+    max-width: 80mm !important;
+    margin: 0 auto !important;
+    padding: 4mm !important;
+    background: #ffffff !important;
+    color: #000000 !important;
     box-shadow: none !important;
     border: none !important;
   }
 
-  /* Non-receipt mode (e.g. printing reports, logs, lists): Hide navigation, actions, sidebars and buttons */
-  body:not(:has(#printable-receipt)):not(:has(.print-report)) .no-print,
-  body:not(:has(#printable-receipt)):not(:has(.print-report)) button,
-  body:not(:has(#printable-receipt)):not(:has(.print-report)) .sidebar,
-  body:not(:has(#printable-receipt)):not(:has(.print-report)) header,
-  body:not(:has(#printable-receipt)):not(:has(.print-report)) nav,
-  body:not(:has(#printable-receipt)):not(:has(.print-report)) .filter-section,
-  body:not(:has(#printable-receipt)):not(:has(.print-report)) .action-buttons,
-  body:not(:has(#printable-receipt)):not(:has(.print-report)) [class*="sticky"],
-  body:not(:has(#printable-receipt)):not(:has(.print-report)) .fixed {
-    display: none !important;
+  /* For full-page reports (PDF export target) */
+  .print-report,
+  .print-report * {
+    visibility: visible !important;
   }
 
-  /* Table splitting fixes */
-  table {
-    page-break-inside: auto;
-  }
-  tr {
-    page-break-inside: avoid;
-    page-break-after: auto;
-  }
-  thead {
-    display: table-header-group;
-  }
-  tfoot {
-    display: table-footer-group;
-  }
-
-  /* Professional Card Print Styles */
-  .professional-card {
-    break-inside: avoid;
-    page-break-inside: avoid;
-    border: 1px solid #e5e7eb !important;
-    box-shadow: none !important;
-    background: white !important;
-  }
-  
-  .professional-card .no-print {
-    display: none !important;
-  }
-
-  /* Ensure proper margins and no blank pages */
   .print-report {
-    page-break-after: avoid;
-  }
-  .print-report .page-break {
-    page-break-before: always;
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    width: 100% !important;
+    padding: 10mm !important;
+    background: #ffffff !important;
+    color: #000000 !important;
   }
 
-  body:not(:has(#printable-receipt)):not(:has(.print-report)) {
-    visibility: visible;
+  /* Always hide these screen-only UI elements */
+  .print\:hidden {
+    display: none !important;
   }
 }
 

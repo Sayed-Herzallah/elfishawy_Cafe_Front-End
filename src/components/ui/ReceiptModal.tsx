@@ -42,7 +42,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ order, isOpen, onClo
         </button>
 
         {/* Printable Receipt Section */}
-        <div id="printable-receipt" className="text-gray-900 font-sans p-2">
+        <div id="printable-receipt" className="text-gray-900 font-sans p-2 text-right bg-white" dir="rtl">
           {/* Cafe Header */}
           <div className="text-center pb-4 border-b-2 border-dashed border-gray-300">
             <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-amber-50 text-amber-900 mb-2 font-bold text-lg">
@@ -64,6 +64,11 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ order, isOpen, onClo
               )}
               <span className="font-mono text-[11px] text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded">مدفوع نقداً</span>
             </div>
+            {order.notes && order.notes.trim() !== '' && (
+              <div className="mt-2 bg-amber-50/70 border border-amber-200/60 p-2 rounded-xl text-xs text-amber-900 text-right font-bold print:border-dashed">
+                <span>📝 ملاحظات:</span> <span className="mr-1 text-gray-800 font-medium">{order.notes}</span>
+              </div>
+            )}
           </div>
 
           {/* Line Items Table */}

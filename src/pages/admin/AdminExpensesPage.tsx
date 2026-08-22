@@ -676,35 +676,59 @@ export const AdminExpensesPage: React.FC = () => {
                         variant: 'danger',
                       },
                     ]}
-                  >
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
-                      <div className="flex flex-col">
-                        <span className="text-gray-500">البيان</span>
-                        <span className="font-medium text-gray-900 truncate">{exp.description}</span>
-                      </div>
-                      <div className="flex flex-col">
-                        <span className="text-gray-500">المبلغ</span>
-                        <span className="font-bold font-mono text-rose-600">{formatPrice(exp.amount)}</span>
-                      </div>
-                      <div className="flex flex-col">
-                        <span className="text-gray-500">الفئة</span>
-                        <span className="font-medium text-gray-900">{categoryLabels[exp.category] || exp.category}</span>
-                      </div>
-                      <div className="flex flex-col">
-                        <span className="text-gray-500">التاريخ</span>
-                        <span className="font-mono text-gray-700 text-[10px]">{formatDate(exp.date)}</span>
-                      </div>
-                    </div>
-                  </ExpenseCard>
+                  />
                 );
               })}
             </div>
           )} 
         </div>
 
-        {/* Sidebar: Category Breakdown Bars (4 cols) - Left side visually */}
-        <div className="lg:col-span-4 lg:order-2 bg-white rounded-2xl border border-gray-200/80 p-6 shadow-2xs space-y-4">
+        {/* Sidebar: Quick Summary + Category Breakdown Bars (4 cols) - Left side visually */}
+        <div className="lg:col-span-4 lg:order-2 lg:sticky lg:top-6 bg-white rounded-2xl border border-gray-200/80 p-5 shadow-2xs space-y-4 self-start">
+          {/* Quick Summary */}
           <div className="flex items-center justify-between pb-3 border-b border-gray-100">
+            <span className="text-xs text-gray-400">نظرة سريعة</span>
+            <h3 className="font-bold text-base text-gray-900">ملخص الفترة</h3>
+          </div>
+
+          {(() => {
+            const shownCount = filteredExpenses.length;
+            const shownTotal = filteredExpenses.reduce((s, e) => s + e.amount, 0);
+            const avgExpense = shownCount > 0 ? shownTotal / shownCount : 0;
+            const biggestExpense = filteredExpenses.reduce((m, e) => (e.amount > m ? e.amount : m), 0);
+            return (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between p-2.5 rounded-xl bg-[#faf8f5] border border-gray-100 text-xs">
+                  <span className="font-bold font-mono text-[#9f1239]">{formatPrice(shownTotal)}</span>
+                  <span className="font-bold text-gray-700 flex items-center gap-1.5">
+                    <DollarSign className="w-3.5 h-3.5 text-gray-400" />
+                    إجمالي المعروض
+                  </span>
+                </div>
+                <div className="flex items-center justify-between p-2.5 rounded-xl bg-[#faf8f5] border border-gray-100 text-xs">
+                  <span className="font-bold font-mono text-gray-900">{formatPrice(avgExpense)}</span>
+                  <span className="font-bold text-gray-700 flex items-center gap-1.5">
+                    <ReceiptText className="w-3.5 h-3.5 text-gray-400" />
+                    متوسط القيد
+                  </span>
+                </div>
+                <div className="flex items-center justify-between p-2.5 rounded-xl bg-[#faf8f5] border border-gray-100 text-xs">
+                  <span className="font-bold font-mono text-gray-900">{formatPrice(biggestExpense)}</span>
+                  <span className="font-bold text-gray-700 flex items-center gap-1.5">
+                    <PieChart className="w-3.5 h-3.5 text-gray-400" />
+                    أكبر قيد
+                  </span>
+                </div>
+                <div className="flex items-center justify-between px-2.5 py-2 text-[11px] text-gray-500">
+                  <span className="font-bold font-mono">{formatNumber(shownCount)} قيد</span>
+                  <span>عدد القيود المعروضة بعد التصفية</span>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Category Breakdown */}
+          <div className="flex items-center justify-between pb-3 pt-1 border-b border-gray-100">
             <span className="text-xs text-gray-400">تحليل نسبي</span>
             <h3 className="font-bold text-base text-gray-900">توزيع المصروفات</h3>
           </div>

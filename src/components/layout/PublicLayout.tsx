@@ -122,7 +122,7 @@ export const PublicLayout: React.FC = () => {
             {'قهوة معمولة بمزاج. كافيه الفيشاوي © '}{new Date().getFullYear()}
           </p>
           <div className="flex items-center gap-6 text-blue-200">
-            <Link to="/about" className="hover:underline">عن المبرمجين</Link>
+            <Link to="/developers" className="hover:underline">عن المبرمجين</Link>
           </div>
         </div>
       </footer>

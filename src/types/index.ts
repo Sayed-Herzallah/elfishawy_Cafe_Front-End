@@ -96,6 +96,7 @@ export interface Order {
   paymentMethod: PaymentMethod;
   orderType: OrderType;
   tableNumber?: number;
+  notes?: string;
   cashierId: string | { _id: string; userName: string; email: string };
   createdAt: string;
   updatedAt?: string;

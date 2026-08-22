@@ -51,8 +51,8 @@ export const AppRoutes: React.FC = () => {
           <Route path="expenses" element={<CashierExpensesPage />} />
         </Route>
 
-        {/* Admin Portal (Admin Only) */}
-        <Route element={<RoleGuard allowedRoles={['admin']} />}>
+        {/* Admin Portal (Admin & Cashier) */}
+        <Route element={<RoleGuard allowedRoles={['admin', 'cashier']} />}>
           <Route path="/admin" element={<AdminLayout />}>
             <Route index element={<AdminDashboardPage />} />
             <Route path="products" element={<AdminProductsPage />} />

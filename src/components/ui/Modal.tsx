@@ -52,7 +52,7 @@ export const Modal: React.FC<ModalProps> = ({
       <div
         className={`relative bg-white rounded-2xl shadow-xl border border-gray-100 w-full ${maxWidthClasses[maxWidth]} p-6 z-10 text-right transform transition-all animate-in fade-in zoom-in-95 duration-150`}
       >
-        <div className="flex items-center justify-between pb-4 mb-4 border-b border-gray-100">
+        <div className="flex flex-row-reverse items-center justify-between pb-4 mb-4 border-b border-gray-100">
           <button
             onClick={onClose}
             className="text-gray-400 hover:text-gray-600 p-1.5 rounded-lg hover:bg-gray-100 transition-colors focus:outline-none focus:ring-2 focus:ring-gray-300"
@@ -60,7 +60,7 @@ export const Modal: React.FC<ModalProps> = ({
           >
             <X className="w-5 h-5" />
           </button>
-          {title && <h3 className="text-lg font-bold text-gray-900">{title}</h3>}
+          {title && <h3 className="text-lg font-bold text-gray-900 font-arabic-heading">{title}</h3>}
         </div>
         <div>{children}</div>
       </div>

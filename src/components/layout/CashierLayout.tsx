@@ -88,16 +88,14 @@ export const CashierLayout: React.FC = () => {
               <ReceiptText className="w-4 h-4 text-gray-400" />
               <span className="truncate">المشتريات</span>
             </NavLink>
-            {isAdmin && (
-              <NavLink
-                to="/admin"
-                onClick={() => setSidebarOpen(false)}
-                className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold transition duration-150 text-gray-600 hover:bg-gray-50 hover:text-gray-900"
-              >
-                <LayoutDashboard className="w-4 h-4 text-gray-400" />
-                <span className="truncate">الإدارة</span>
-              </NavLink>
-            )}
+            <NavLink
+              to="/admin"
+              onClick={() => setSidebarOpen(false)}
+              className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold transition duration-150 text-gray-600 hover:bg-gray-50 hover:text-gray-900"
+            >
+              <LayoutDashboard className="w-4 h-4 text-gray-400" />
+              <span className="truncate">الإدارة</span>
+            </NavLink>
           </nav>
         </div>
 
@@ -181,15 +179,13 @@ export const CashierLayout: React.FC = () => {
           </button>
           
           <div className="hidden lg:flex items-center gap-2">
-            {isAdmin && (
-              <button
-                onClick={() => navigate('/admin')}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-50 hover:bg-blue-100 text-[#2e5b9f] font-bold text-xs border border-blue-200 transition cursor-pointer whitespace-nowrap"
-              >
-                <LayoutDashboard className="w-3.5 h-3.5" />
-                <span>الإدارة</span>
-              </button>
-            )}
+            <button
+              onClick={() => navigate('/admin')}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-50 hover:bg-blue-100 text-[#2e5b9f] font-bold text-xs border border-blue-200 transition cursor-pointer whitespace-nowrap"
+            >
+              <LayoutDashboard className="w-3.5 h-3.5" />
+              <span>الإدارة</span>
+            </button>
 
             <button
               onClick={() => setShowLogoutConfirm(true)}

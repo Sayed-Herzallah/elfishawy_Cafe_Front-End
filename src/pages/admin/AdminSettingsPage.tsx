@@ -83,7 +83,7 @@ export const AdminSettingsPage: React.FC = () => {
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Input
+            {/* <Input
               label="رقم الهاتف *"
               value={phone}
               onChange={(e) => {
@@ -92,12 +92,12 @@ export const AdminSettingsPage: React.FC = () => {
               }}
               error={profileErrors.phone}
               required
-            />
-            <Input
+            /> */}
+            {/* <Input
               label="العنوان"
               value={address}
               onChange={(e) => setAddress(e.target.value)}
-            />
+            /> */}
           </div>
 
           <div className="pt-2 flex justify-end">

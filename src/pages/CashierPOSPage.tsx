@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { productService, categoryService } from '../services/catalogService';
 import { orderService } from '../services/opsService';
 import { syncAllProductsStock } from '../utils/stockSync';
@@ -52,6 +52,7 @@ export const CashierPOSPage: React.FC = () => {
   // Today's Orders Modal & Search
   const [isTodayOrdersOpen, setIsTodayOrdersOpen] = useState<boolean>(false);
   const [orderSearchText, setOrderSearchText] = useState<string>('');
+  const [todaySearchMode, setTodaySearchMode] = useState<'all' | 'orderNumber' | 'table' | 'product'>('all');
 
   const { showToast, showError } = useNotification();
 
@@ -211,6 +212,7 @@ export const CashierPOSPage: React.FC = () => {
         paymentMethod: 'cash' as const,
         orderType: 'dine-in' as const,
         tableNumber: tableNumber ? parseInt(tableNumber, 10) : 1,
+        notes: orderNote,
       };
 
       const res = await orderService.createOrder(orderPayload);
@@ -245,7 +247,7 @@ export const CashierPOSPage: React.FC = () => {
     
     setCart(cartItems);
     setTableNumber(order.tableNumber ? String(order.tableNumber) : '');
-    setOrderNote('');
+    setOrderNote(order.notes || '');
     setEditingOrder(order);
     setIsEditMode(true);
     showToast('تم تحميل الطلب للتعديل', 'info');
@@ -273,6 +275,7 @@ export const CashierPOSPage: React.FC = () => {
         paymentMethod: 'cash' as const,
         orderType: 'dine-in' as const,
         tableNumber: tableNumber ? parseInt(tableNumber, 10) : 1,
+        notes: orderNote,
       };
 
       const res = await orderService.updateOrder(editingOrder._id, orderPayload);
@@ -299,22 +302,44 @@ export const CashierPOSPage: React.FC = () => {
     return matchesCat && matchesSearch;
   });
 
-  // Filter today's orders by drink product name, order ID, or table
-  const filteredTodayOrders = allOrders.filter((ord) => {
-    const q = orderSearchText.trim().toLowerCase();
-    if (!q) return true;
+  // Filter today's orders by drink product name, order ID, or table with specific modes
+  const filteredTodayOrders = useMemo(() => {
+    return allOrders.filter((ord) => {
+      const q = orderSearchText.trim().toLowerCase();
+      if (!q) return true;
 
-    const matchesId = ord.orderNumber.toLowerCase().includes(q) || ord._id.toLowerCase().includes(q);
-    const matchesTable = ord.tableNumber ? String(ord.tableNumber).includes(q) : false;
-    const matchesDrink = ord.items.some((it) => {
-      const pName = typeof it.product === 'object' ? it.product.name : '';
-      return pName.toLowerCase().includes(q);
+      if (todaySearchMode === 'orderNumber') {
+        const cleanQ = q.replace('#', '');
+        return ord.orderNumber.toLowerCase().includes(cleanQ);
+      }
+
+      if (todaySearchMode === 'table') {
+        const cleanQ = q.replace(/[^0-9]/g, '');
+        if (!cleanQ) return ord.orderType === 'takeaway';
+        return ord.tableNumber === Number(cleanQ);
+      }
+
+      if (todaySearchMode === 'product') {
+        return ord.items.some((it) => {
+          const name = typeof it.product === 'object' ? it.product.name : '';
+          return name.toLowerCase().includes(q);
+        });
+      }
+
+      // 'all' mode
+      const cleanQ = q.replace('#', '');
+      const matchesId = ord.orderNumber.toLowerCase().includes(cleanQ) || ord._id.toLowerCase().includes(cleanQ);
+      const matchesTable = ord.tableNumber ? String(ord.tableNumber).includes(cleanQ) : false;
+      const matchesDrink = ord.items.some((it) => {
+        const pName = typeof it.product === 'object' ? it.product.name : '';
+        return pName.toLowerCase().includes(q);
+      });
+
+      return matchesId || matchesTable || matchesDrink;
     });
+  }, [allOrders, orderSearchText, todaySearchMode]);
 
-    return matchesId || matchesTable || matchesDrink;
-  });
-
-  const todayRevenue = allOrders.reduce((sum, o) => sum + o.totalAmount, 0);
+  // const todayRevenue = allOrders.reduce((sum, o) => sum + o.totalAmount, 0);
 
   return (
     <div className="flex flex-col gap-4 text-right font-sans">
@@ -446,9 +471,14 @@ export const CashierPOSPage: React.FC = () => {
                       <span className="text-sm font-bold text-gray-900 block truncate leading-snug">
                         {item.product.name}
                       </span>
-                      <span className="text-xs text-gray-500 font-mono mt-0.5 block">
-                        {formatPrice(item.product.price)} للقطعة
-                      </span>
+                      <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
+                        <span className="text-xs text-gray-500 font-mono">
+                          {formatPrice(item.product.price)} للقطعة
+                        </span>
+                        <span className="text-[10px] bg-amber-50 text-amber-800 border border-amber-200/60 px-1.5 py-0.2 rounded font-bold">
+                       أقصي عدد من الاكواب: {formatNumber(item.product.stockQuantity)} كوب
+                        </span>
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -677,21 +707,81 @@ export const CashierPOSPage: React.FC = () => {
       >
         <div className="space-y-4 text-right font-sans">
           {/* Quick Header Metric - Hidden totals for security */}
-          <div className="p-3 bg-[#faf8f5] border border-gray-200 rounded-xl text-center shadow-3xs">
-            <span className="text-xs font-bold text-gray-700">سجل فواتير اليوم الصادرة للمطابقة والمراجعة</span>
+          <div className="p-3 bg-[#faf8f5] border border-gray-200/80 rounded-2xl text-center shadow-3xs flex items-center justify-between text-xs text-gray-700">
+            <span>إجمالي فواتير اليوم الصادرة: <strong className="text-[#2e5b9f] font-mono text-sm">{allOrders.length}</strong></span>
+            {/* <span>القيمة الإجمالية: <strong className="text-emerald-700 font-mono text-sm">{formatPrice(todayRevenue)}</strong></span> */}
           </div>
 
-          {/* Search Bar for Product or Order ID */}
-          <div className="relative">
-            <Search className="w-4 h-4 text-gray-400 absolute right-3.5 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              placeholder="ابحث باسم المشروب (مثال: كابتشينو، لاتيه)، أو رقم الفاتورة، أو الطاولة..."
-              value={orderSearchText}
-              onChange={(e) => setOrderSearchText(e.target.value)}
-              className="w-full bg-[#faf8f5] border border-gray-200 rounded-xl pr-10 pl-3 py-2.5 text-xs text-gray-900 focus:outline-none focus:ring-1 focus:ring-[#2e5b9f]"
-              autoFocus
-            />
+          {/* Search Inputs & Mode Tabs */}
+          <div className="bg-white rounded-2xl border border-gray-150 p-3 shadow-3xs space-y-3">
+            <div className="relative">
+              <Search className="w-4 h-4 text-gray-400 absolute right-3.5 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                placeholder={
+                  todaySearchMode === 'orderNumber'
+                    ? 'ابحث برقم الفاتورة فقط...'
+                    : todaySearchMode === 'table'
+                    ? 'ابحث برقم الطاولة فقط...'
+                    : todaySearchMode === 'product'
+                    ? 'ابحث باسم المشروب...'
+                    : 'ابحث برقم الفاتورة، أو الطاولة، أو اسم المشروب...'
+                }
+                value={orderSearchText}
+                onChange={(e) => setOrderSearchText(e.target.value)}
+                className="w-full bg-[#faf8f5] border border-gray-200 rounded-xl pr-10 pl-3 py-2.5 text-xs text-gray-900 focus:outline-none focus:ring-1 focus:ring-[#2e5b9f]"
+                autoFocus
+              />
+            </div>
+
+            {/* Smart Search Mode Selector Tabs */}
+            <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-xl text-[10px] sm:text-xs font-bold">
+              <button
+                type="button"
+                onClick={() => setTodaySearchMode('all')}
+                className={`flex-1 py-1.5 rounded-lg transition cursor-pointer text-center ${
+                  todaySearchMode === 'all' ? 'bg-white text-gray-900 shadow-2xs font-bold' : 'text-gray-500 hover:text-gray-800'
+                }`}
+              >
+                الكل
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setTodaySearchMode('orderNumber')}
+                className={`flex-1 py-1.5 rounded-lg transition cursor-pointer text-center ${
+                  todaySearchMode === 'orderNumber'
+                    ? 'bg-[#2e5b9f] text-white shadow-2xs font-bold'
+                    : 'text-gray-500 hover:text-gray-800'
+                }`}
+              >
+                رقم الفاتورة
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setTodaySearchMode('table')}
+                className={`flex-1 py-1.5 rounded-lg transition cursor-pointer text-center ${
+                  todaySearchMode === 'table'
+                    ? 'bg-[#2e5b9f] text-white shadow-2xs font-bold'
+                    : 'text-gray-500 hover:text-gray-800'
+                }`}
+              >
+                رقم الطاولة
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setTodaySearchMode('product')}
+                className={`flex-1 py-1.5 rounded-lg transition cursor-pointer text-center ${
+                  todaySearchMode === 'product'
+                    ? 'bg-[#2e5b9f] text-white shadow-2xs font-bold'
+                    : 'text-gray-500 hover:text-gray-800'
+                }`}
+              >
+                المشروب / الصنف
+              </button>
+            </div>
           </div>
 
           {/* Orders List */}
@@ -699,56 +789,74 @@ export const CashierPOSPage: React.FC = () => {
             <div className="text-center py-10 text-gray-400 bg-[#faf8f5] border border-dashed border-gray-200 rounded-xl">
               <SearchX className="w-6 h-6 text-[#2e5b9f] mx-auto mb-2 opacity-60" />
               <p className="text-xs font-bold text-gray-600">لا توجد فواتير تطابق بحثك</p>
-              <p className="text-[11px] text-gray-400 mt-1">جرّب رقم فاتورة أو اسم مشروب أو رقم طاولة آخر</p>
+              <p className="text-[11px] text-gray-400 mt-1">جرّب كتابة تفاصيل بحث أخرى</p>
             </div>
           ) : (
             <div className="space-y-2.5 max-h-[380px] overflow-y-auto pr-1">
-              {filteredTodayOrders.map((ord) => (
-                <div
-                  key={ord._id}
-                  className="p-3.5 rounded-xl bg-white border border-gray-200/80 shadow-2xs hover:border-gray-300 transition flex flex-col sm:flex-row sm:items-center justify-between gap-3"
-                >
-                  <div className="space-y-1 text-right">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-bold font-mono text-gray-900">
-                        #{ord.orderNumber.replace(/[^0-9]/g, '')}
-                      </span>
-                      <span className="text-[11px] text-gray-500 font-mono flex items-center gap-1">
-                        <Clock className="w-3 h-3 text-gray-400" />
-                        {formatTime(ord.createdAt)}
-                      </span>
-                      <span className="text-[10px] bg-emerald-50 text-emerald-800 font-bold px-2 py-0.5 rounded">
-                        طاولة #{ord.tableNumber || 1}
-                      </span>
+              {filteredTodayOrders.map((ord, idx) => {
+                const sequentialIndex = filteredTodayOrders.length - idx;
+                return (
+                  <div
+                    key={ord._id}
+                    className="p-3.5 rounded-2xl bg-white border border-gray-200/80 shadow-2xs hover:border-gray-300 transition flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-right"
+                    dir="rtl"
+                  >
+                    <div className="space-y-1 text-right flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-mono font-bold bg-[#2e5b9f]/10 text-[#2e5b9f] px-2 py-0.5 rounded-md">
+                          تسلسل #{sequentialIndex}
+                        </span>
+                        <span className="text-xs font-bold font-mono text-gray-900 bg-gray-100 px-2 py-0.5 rounded-md">
+                          فاتورة #{ord.orderNumber}
+                        </span>
+                        <span className="text-[11px] text-gray-500 font-mono flex items-center gap-1">
+                          <Clock className="w-3 h-3 text-gray-400" />
+                          {formatTime(ord.createdAt)}
+                        </span>
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
+                          ord.orderType === 'dine-in'
+                            ? 'bg-blue-50 text-[#2e5b9f]'
+                            : 'bg-gray-100 text-gray-700'
+                        }`}>
+                          {ord.orderType === 'dine-in' ? `طاولة #${ord.tableNumber || 1}` : 'سفري'}
+                        </span>
+                      </div>
+
+                      {/* Drink items preview */}
+                      <div className="text-xs text-gray-600 flex flex-wrap gap-1.5 pt-1">
+                        {ord.items.map((item, itemIdx) => {
+                          const name = typeof item.product === 'object' ? item.product.name : 'مشروب';
+                          return (
+                            <span key={itemIdx} className="bg-[#faf8f5] border border-gray-100 px-2 py-0.5 rounded text-[11px] font-medium">
+                              {name} <strong className="text-[#2e5b9f] font-mono">×{formatNumber(item.quantity)}</strong>
+                            </span>
+                          );
+                        })}
+                      </div>
+
+                      {/* Notes preview if exists */}
+                      {ord.notes && ord.notes.trim() !== '' && (
+                        <div className="text-[11px] text-amber-700 bg-amber-50/50 p-1.5 rounded-lg inline-block border border-amber-100 mt-1">
+                          📝 ملاحظة: <span className="text-gray-700">{ord.notes}</span>
+                        </div>
+                      )}
                     </div>
 
-                    {/* Drink items preview */}
-                    <div className="text-xs text-gray-600 flex flex-wrap gap-1.5 pt-1">
-                      {ord.items.map((item, idx) => {
-                        const name = typeof item.product === 'object' ? item.product.name : 'مشروب';
-                        return (
-                          <span key={idx} className="bg-[#faf8f5] border border-gray-100 px-2 py-0.5 rounded text-[11px] font-medium">
-                            {name} (×{formatNumber(item.quantity)})
-                          </span>
-                        );
-                      })}
+                    <div className="flex items-center justify-between sm:justify-end gap-3 pt-2 sm:pt-0 border-t sm:border-t-0 border-gray-100">
+                      <button
+                        onClick={() => {
+                          setSelectedReceiptOrder(ord);
+                        }}
+                        className="inline-flex items-center gap-1 bg-[#2e5b9f] hover:bg-[#244b85] text-white py-1.5 px-3 rounded-lg text-xs font-bold transition shadow-2xs cursor-pointer"
+                        title="طباعة الفاتورة"
+                      >
+                        <Printer className="w-3.5 h-3.5" />
+                        <span>طباعة الفاتورة</span>
+                      </button>
                     </div>
                   </div>
-
-                  <div className="flex items-center justify-between sm:justify-end gap-3 pt-2 sm:pt-0 border-t sm:border-t-0 border-gray-100">
-                    <button
-                      onClick={() => {
-                        setSelectedReceiptOrder(ord);
-                      }}
-                      className="inline-flex items-center gap-1 bg-white hover:bg-gray-50 border border-gray-200 text-gray-700 py-1.5 px-3 rounded-lg text-xs font-bold transition shadow-2xs cursor-pointer"
-                      title="طباعة الفاتورة"
-                    >
-                      <Printer className="w-3.5 h-3.5 text-[#2e5b9f]" />
-                      <span>طباعة</span>
-                    </button>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
