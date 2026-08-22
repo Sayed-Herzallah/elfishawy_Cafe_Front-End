@@ -105,7 +105,7 @@ const SocialLinks: React.FC<{ social: Developer["social"] }> = ({ social }) => {
 export const AboutDevelopersPage: React.FC = () => {
   const developers: Developer[] = [
     {
-      name: "السيد حرزالله",
+      name: "السيد حرز الله",
       nameEn: "Sayed Herzallah",
       role: "مطور Full Stack",
       badge: "Full Stack Developer",
