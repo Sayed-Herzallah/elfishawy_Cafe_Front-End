@@ -1,6 +1,6 @@
 import React from "react";
 import { Link } from "react-router-dom";
-import { ArrowLeft, Code2, Github, Linkedin, Mail, Star, Layers, Server, Database, Palette, Monitor } from "lucide-react";
+import { ArrowLeft, Code2, Github, Linkedin, Mail, Star, Layers, Server, Database, Palette, Monitor, Globe } from "lucide-react";
 
 interface Developer {
   name: string;
@@ -13,8 +13,45 @@ interface Developer {
   skills: string[];
   accentFrom: string;
   accentTo: string;
-  social: { github: string; linkedin: string; email: string  ; portfolio: string };
+  social: { github?: string; linkedin?: string; email: string; portfolio?: string; behance?: string };
 }
+
+/** أيقونة Behance (مش موجودة في lucide) */
+const BehanceIcon: React.FC<{ className?: string }> = ({ className }) => (
+  <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
+    <path d="M16.969 16.927a2.561 2.561 0 0 0 1.901.677 2.501 2.501 0 0 0 1.531-.475c.362-.235.636-.584.779-.99h2.585a5.091 5.091 0 0 1-1.9 2.896 5.292 5.292 0 0 1-3.091.88 5.839 5.839 0 0 1-2.284-.433 4.871 4.871 0 0 1-1.723-1.211 5.657 5.657 0 0 1-1.08-1.874 7.057 7.057 0 0 1-.383-2.393c-.005-.8.129-1.594.396-2.349a5.313 5.313 0 0 1 5.088-3.604 4.87 4.87 0 0 1 2.376.563c.661.362 1.231.87 1.668 1.485a6.2 6.2 0 0 1 .943 2.133c.194.821.263 1.666.205 2.508h-7.678c-.063.79.184 1.574.688 2.187ZM6.947 4.084a8.065 8.065 0 0 1 1.928.198 4.29 4.29 0 0 1 1.49.638c.418.303.748.71.959 1.182.241.579.357 1.203.339 1.83a3.506 3.506 0 0 1-.473 1.932 3.726 3.726 0 0 1-1.455 1.287 3.588 3.588 0 0 1 1.958 1.408c.443.681.665 1.483.635 2.295a4.653 4.653 0 0 1-.461 2.126 3.942 3.942 0 0 1-1.258 1.436 5.598 5.598 0 0 1-1.807.79 8.273 8.273 0 0 1-2.075.25H0V4.084h6.947Zm10.955 1.91a2.157 2.157 0 0 1-1.741-.684 2.43 2.43 0 0 1-.573-1.622 2.318 2.318 0 0 1 .593-1.62 2.125 2.125 0 0 1 1.664-.657 2.2 2.2 0 0 1 1.688.64 2.256 2.256 0 0 1 .601 1.636 2.207 2.207 0 0 1-.593 1.622 2.128 2.128 0 0 1-1.64.684v.001Zm-9.896 3.63a2.155 2.155 0 0 0 1.317-.383 1.505 1.505 0 0 0 .512-1.273 1.612 1.612 0 0 0-.166-.78 1.309 1.309 0 0 0-.448-.482 1.918 1.918 0 0 0-.65-.24 4.63 4.63 0 0 0-.764-.07H3.24v3.23h3.764v-.002Zm.195 3.854a5.147 5.147 0 0 0-.84-.07H3.24v3.81h3.752c.382 0 .748-.036 1.11-.11a2.63 2.63 0 0 0 .914-.365c.264-.168.48-.4.626-.674.163-.315.241-.666.228-1.02a2.144 2.144 0 0 0-.704-1.765 3.149 3.149 0 0 0-.97-.326h.001Z" />
+  </svg>
+);
+
+/** صف أزرار التواصل - يعرض فقط الروابط المعبأة */
+const SocialLinks: React.FC<{ social: Developer["social"] }> = ({ social }) => {
+  const links = [
+    { title: "البورتفوليو", href: social.portfolio, hover: "hover:bg-blue-50 hover:text-[#2e5b9f]", icon: <Globe className="w-4 h-4" /> },
+    { title: "البريد الإلكتروني", href: social.email, hover: "hover:bg-rose-50 hover:text-rose-600", icon: <Mail className="w-4 h-4" /> },
+    { title: "LinkedIn", href: social.linkedin, hover: "hover:bg-blue-50 hover:text-blue-700", icon: <Linkedin className="w-4 h-4" /> },
+    { title: "GitHub", href: social.github, hover: "hover:bg-gray-200", icon: <Github className="w-4 h-4" /> },
+    { title: "Behance", href: social.behance, hover: "hover:bg-blue-50 hover:text-[#1769ff]", icon: <BehanceIcon className="w-4 h-4" /> },
+  ].filter((link) => !!link.href);
+
+  if (links.length === 0) return null;
+
+  return (
+    <div className="flex items-center justify-end gap-2 pt-3 border-t border-gray-100">
+      {links.map((link) => (
+        <a
+          key={link.title}
+          href={link.href}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={`p-2 rounded-xl bg-gray-100 text-gray-500 transition-colors ${link.hover}`}
+          title={link.title}
+        >
+          {link.icon}
+        </a>
+      ))}
+    </div>
+  );
+};
 
 export const AboutDevelopersPage: React.FC = () => {
   const developers: Developer[] = [
@@ -30,7 +67,7 @@ export const AboutDevelopersPage: React.FC = () => {
         { text: "Dashboard & POS System" },
         { text: "System Architecture" },
       ],
-      skills: ["React", "TypeScript", "Node.js", "MongoDB", "Tailwind CSS", "Express.js"],
+      skills: ["React", "TypeScript", "Node.js", "MongoDB", "Tailwind CSS", "Express.js"," RESTful APIs", "System Design", "Authentication & Authorization"," Payment Integration"," Real-time Features"," Testing & Debugging"],
       accentFrom: "from-[#2e5b9f]",
       accentTo: "to-blue-700",
       social: { github: "https://github.com/Sayed-Herzallah", linkedin: "https://www.linkedin.com/in/sayed-herzallah/", email: "mailto:herzallahdeveloper@gmail.com", portfolio:"https://herzallah.me" },
@@ -47,10 +84,11 @@ export const AboutDevelopersPage: React.FC = () => {
         { text: "Visual Identity & Branding" },
         { text: "RTL UX & Accessibility" },
       ],
-      skills: ["Figma", "UI Design", "UX Research", "Design Systems", "RTL Layouts", "Prototyping"],
+      skills: ["Figma", "UI Design", "UX Research", "Design Systems", "RTL Layouts", "Prototyping"," User Flows", "Wireframing", "Interaction Design", "Accessibility Standards", "Responsive Design"],
       accentFrom: "from-rose-700",
       accentTo: "to-pink-700",
-      social: { github: "https://github.com", linkedin: "https://linkedin.com", email: "mailto:hanaa@elfishawy.com", portfolio: "https://elfishawy.com" },
+      // TODO: ضع روابط هناء هنا — سيظهر زر الإيميل وزر Behance فقط عند تعبئتها
+      social: { email: "mailto:hanaamahmoud186@gmail.com", behance: "https://www.behance.net/hanaamahmoud7" },
     },
   ];
 
@@ -127,17 +165,7 @@ export const AboutDevelopersPage: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="flex items-center justify-end gap-2 pt-3 border-t border-gray-100">
-                  <a href={dev.social.email} className="p-2 rounded-xl bg-gray-100 hover:bg-rose-50 hover:text-rose-600 text-gray-500 transition-colors" title="البريد الإلكتروني">
-                    <Mail className="w-4 h-4" />
-                  </a>
-                  <a href={dev.social.linkedin} target="_blank" rel="noopener noreferrer" className="p-2 rounded-xl bg-gray-100 hover:bg-blue-50 hover:text-blue-700 text-gray-500 transition-colors" title="LinkedIn">
-                    <Linkedin className="w-4 h-4" />
-                  </a>
-                  <a href={dev.social.github} target="_blank" rel="noopener noreferrer" className="p-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-500 transition-colors" title="GitHub">
-                    <Github className="w-4 h-4" />
-                  </a>
-                </div>
+                <SocialLinks social={dev.social} />
               </div>
             </article>
           ))}

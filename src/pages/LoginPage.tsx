@@ -49,9 +49,9 @@ export const LoginPage: React.FC = () => {
         {/* Circular Stamp Graphic */}
         <div className="relative flex flex-col items-center justify-center p-8 rounded-full border-2 border-dashed border-white/40 w-64 h-64 text-center">
           <div className="absolute inset-0 flex items-center justify-center animate-spin-slow">
-            <span className="text-sm font-bold tracking-widest font-mono text-white/80">
+            {/* <span className="text-sm font-bold tracking-widest font-mono text-white/80">
               LEDGER & ESPRESSO •
-            </span>
+            </span> */}
           </div>
           <Coffee className="w-16 h-16 text-white drop-shadow-md" />
           <div className="text-xs font-bold mt-2 font-mono tracking-wider">EL-FISHAWY</div>
