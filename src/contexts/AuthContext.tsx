@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback, useRef } from 'react';
 import { User, UserRole } from '../types';
 import { ApiClient } from '../services/api/apiClient';
 import { authService, userService } from '../services/authService';
@@ -23,6 +23,12 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const { showToast, showError } = useNotification();
+  // هل كان فيه جلسة نشطة؟ (عشان رسالة انتهاء الجلسة متتكررش)
+  const wasAuthenticatedRef = useRef(false);
+
+  useEffect(() => {
+    wasAuthenticatedRef.current = !!user;
+  }, [user]);
 
   const loadCurrentUser = useCallback(async () => {
     const token = ApiClient.getAccessToken();
@@ -50,7 +56,12 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     const handleUnauthorized = () => {
       setUser(null);
-      showToast('انتهت صلاحية الجلسة، يرجى تسجيل الدخول مجدداً', 'error');
+      // اعرض رسالة انتهاء الجلسة مرة واحدة فقط عند فقدان جلسة فعلاً نشطة،
+      // مش على كل طلب 401 بيحصل واليوزر خارج أصلاً (ده كان سبب تكرار الرسالة)
+      if (wasAuthenticatedRef.current) {
+        wasAuthenticatedRef.current = false;
+        showToast('انتهت صلاحية الجلسة، يرجى تسجيل الدخول مجدداً', 'error');
+      }
     };
 
     window.addEventListener('auth:unauthorized', handleUnauthorized);

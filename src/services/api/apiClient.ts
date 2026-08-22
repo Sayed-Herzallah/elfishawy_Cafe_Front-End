@@ -2,6 +2,9 @@ import { ApiResponse } from '../../types';
 
 const BASE_URL = (import.meta as any).env?.VITE_API_BASE_URL || 'https://elfishawy-cafe-server.vercel.app';
 
+// مكشوفة عشان services تانية تستخدمها (زي logout)
+export const API_BASE_URL = BASE_URL;
+
 const STORAGE_KEYS = {
   ACCESS_TOKEN: 'ef_access_token',
   REFRESH_TOKEN: 'ef_refresh_token',
@@ -9,6 +12,14 @@ const STORAGE_KEYS = {
 };
 
 export class ApiClient {
+  // Single-flight refresh: لو أكتر من طلب واخد 401 في نفس اللحظة، يتعمل refresh واحد بس
+  private static refreshPromise: Promise<boolean> | null = null;
+  // منع تكرار إشعار انتهاء الجلسة: مرة واحدة كحد أقصى كل 30 ثانية
+  private static lastUnauthorizedAt = 0;
+
+  // عدّاد الجلسات: بيزيد مع كل logout عشان يلغي أي refresh/retry جاري
+  private static sessionEpoch = 0;
+
   public static getAccessToken(): string | null {
     return localStorage.getItem(STORAGE_KEYS.ACCESS_TOKEN);
   }
@@ -20,9 +31,15 @@ export class ApiClient {
   public static setTokens(accessToken: string, refreshToken: string) {
     localStorage.setItem(STORAGE_KEYS.ACCESS_TOKEN, accessToken);
     localStorage.setItem(STORAGE_KEYS.REFRESH_TOKEN, refreshToken);
+    // جلسة جديدة: اسمح بإشعار انتهاء الجلسة مرة أخرى لو حصلت لاحقاً
+    ApiClient.lastUnauthorizedAt = 0;
   }
 
   public static clearTokens() {
+    // إلغاء أي عملية refresh أو retry جارية فوراً (عشان التوكن ميرجعش بعد الخروج)
+    ApiClient.sessionEpoch++;
+    ApiClient.refreshPromise = null;
+    ApiClient.lastUnauthorizedAt = 0;
     localStorage.removeItem(STORAGE_KEYS.ACCESS_TOKEN);
     localStorage.removeItem(STORAGE_KEYS.REFRESH_TOKEN);
     localStorage.removeItem(STORAGE_KEYS.ACTIVE_USER);
@@ -48,15 +65,21 @@ export class ApiClient {
       headers['Content-Type'] = 'application/json';
     }
 
+    const sessionEpoch = ApiClient.sessionEpoch;
+
     try {
       const response = await fetch(url, {
         ...options,
         headers,
       });
 
-      // 401 Unauthorized -> Attempt token refresh
+      // 401 Unauthorized -> Attempt token refresh (single-flight للطلبات المتوازية)
       if (response.status === 401 && endpoint !== '/auth/login' && endpoint !== '/auth/refreshToken') {
-        const refreshed = await ApiClient.tryRefreshToken();
+        const refreshed = await ApiClient.refreshAccessToken();
+        // لو حصل logout أثناء الطلب، ارفض التجديد فوراً
+        if (sessionEpoch !== ApiClient.sessionEpoch) {
+          throw { success: false, message: 'Unauthorized' };
+        }
         if (refreshed) {
           headers['authorization'] = ApiClient.getAccessToken() || '';
           const retryRes = await fetch(url, { ...options, headers });
@@ -65,7 +88,7 @@ export class ApiClient {
           return retryData;
         } else {
           ApiClient.clearTokens();
-          window.dispatchEvent(new CustomEvent('auth:unauthorized'));
+          ApiClient.notifyUnauthorized();
           throw { success: false, message: 'Unauthorized' };
         }
       }
@@ -81,7 +104,26 @@ export class ApiClient {
     }
   }
 
+  /** إشعار انتهاء الجلسة: مرة واحدة كحد أقصى كل 30 ثانية بدل ما يتكرر مع كل طلب polling */
+  private static notifyUnauthorized() {
+    const now = Date.now();
+    if (now - ApiClient.lastUnauthorizedAt < 30_000) return;
+    ApiClient.lastUnauthorizedAt = now;
+    window.dispatchEvent(new CustomEvent('auth:unauthorized'));
+  }
+
+  /** Single-flight: الطلبات اللي بتاخد 401 في نفس اللحظة بتتقاسم نفس عملية الـ refresh */
+  private static refreshAccessToken(): Promise<boolean> {
+    if (!ApiClient.refreshPromise) {
+      ApiClient.refreshPromise = ApiClient.tryRefreshToken().finally(() => {
+        ApiClient.refreshPromise = null;
+      });
+    }
+    return ApiClient.refreshPromise;
+  }
+
   private static async tryRefreshToken(): Promise<boolean> {
+    const epoch = ApiClient.sessionEpoch;
     const refreshToken = ApiClient.getRefreshToken();
     if (!refreshToken) return false;
 
@@ -91,9 +133,17 @@ export class ApiClient {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ refreshToken }),
       });
-      const data = await res.json();
-      if (res.ok && data.accessToken) {
-        localStorage.setItem(STORAGE_KEYS.ACCESS_TOKEN, data.accessToken);
+      if (!res.ok) return false;
+
+      // استجابة مرنة: { accessToken } أو { tokens: { accessToken } } أو { data: { accessToken } }
+      const data = await res.json().catch(() => null);
+      const accessToken: string | undefined =
+        data?.accessToken || data?.tokens?.accessToken || data?.data?.accessToken;
+
+      if (accessToken) {
+        // متخزنش توكن جديد لو عملت logout أثناء الـ refresh
+        if (epoch !== ApiClient.sessionEpoch) return false;
+        localStorage.setItem(STORAGE_KEYS.ACCESS_TOKEN, accessToken);
         return true;
       }
       return false;
