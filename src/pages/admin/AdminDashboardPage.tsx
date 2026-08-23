@@ -27,6 +27,7 @@ import {
 } from '../../hooks/useStatisticsComparison';
 import {
   TrendingUp,
+  TrendingDown,
   ReceiptText,
   ShoppingBag,
   Coins,
@@ -188,7 +189,8 @@ export const AdminDashboardPage: React.FC = () => {
   const totalExpenses = totalOperating + totalPurchases;
 
   const ordersCount = filteredOrders.length;
-  const netProfit = Math.max(0, totalSales - totalExpenses);
+  // ✅ صافي الربح الحقيقي — السالب يعني خسارة (المصروفات أكبر من المبيعات)
+  const netProfit = totalSales - totalExpenses;
 
   // Dynamic comparison with previous period
   const now = new Date();
@@ -236,7 +238,7 @@ export const AdminDashboardPage: React.FC = () => {
   const prevExpenses = prevPeriodExpenses.reduce((sum, e) => sum + e.amount, 0);
 
   const prevOrdersCount = prevOrdersList.length;
-  const prevNetProfit = Math.max(0, prevSales - prevExpenses);
+  const prevNetProfit = prevSales - prevExpenses;
 
   const getChangePct = (curr: number, prev: number) => {
     if (prev === 0) return curr > 0 ? 100 : 0;
@@ -643,12 +645,12 @@ export const AdminDashboardPage: React.FC = () => {
           comparison={operatingComparison}
         />
 
-        {/* Card 3: صافي الأرباح */}
+        {/* Card 3: صافي الأرباح — بالسالب لو خسارة */}
         <ComparisonStatCard
-          title="صافي الأرباح"
-          value={formatPrice(profitComparison.current)}
-          icon={<Coins className="w-6 h-6" />}
-          accentColor="emerald"
+          title={profitComparison.current < 0 ? 'صافي الخسارة' : 'صافي الأرباح'}
+          value={profitComparison.current < 0 ? formatPrice(Math.abs(profitComparison.current)) : formatPrice(profitComparison.current)}
+          icon={profitComparison.current < 0 ? <TrendingDown className="w-6 h-6" /> : <Coins className="w-6 h-6" />}
+          accentColor={profitComparison.current < 0 ? 'rose' : 'emerald'}
           comparison={profitComparison}
         />
 

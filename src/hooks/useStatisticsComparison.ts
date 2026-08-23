@@ -250,8 +250,9 @@ export function useProfitComparison(
     })
     .reduce((sum, e) => sum + e.amount, 0);
 
-  const current = Math.max(0, currentSales - currentExpenses);
-  const previous = Math.max(0, previousSales - previousExpenses);
+  // ✅ صافي الربح الحقيقي — ممكن يكون بالسالب (خسارة) لو المصروفات أكبر من المبيعات
+  const current = currentSales - currentExpenses;
+  const previous = previousSales - previousExpenses;
   const changeAbsolute = current - previous;
   const changePercent = previous === 0 ? (current > 0 ? 100 : 0) : Math.round((changeAbsolute / previous) * 100);
 

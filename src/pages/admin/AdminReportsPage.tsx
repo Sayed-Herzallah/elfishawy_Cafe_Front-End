@@ -208,8 +208,9 @@ export const AdminReportsPage: React.FC = () => {
     .filter((e) => e.category === 'inventory')
     .reduce((s, e) => s + e.amount, 0);
   const operatingFiltered = totalExpensesFiltered - purchasesFiltered;
-  // Clamped so purchases/more expenses never surface a negative "net profit"
-  const netProfit = Math.max(0, totalRevenue - totalExpensesFiltered);
+  // ✅ صافي الربح الحقيقي = المبيعات − (المشتريات + المصروفات التشغيلية) — والسالب يعني خسارة
+  const netProfit = totalRevenue - totalExpensesFiltered;
+  const isLoss = netProfit < 0;
   const profitMargin = totalRevenue > 0 ? Math.round((netProfit / totalRevenue) * 100) : 0;
 
   // Real percentage indicators for the KPI cards
@@ -389,10 +390,10 @@ export const AdminReportsPage: React.FC = () => {
           comparison={expensesComparison}
         />
         <ComparisonStatCard
-          title="صافي الربح"
-          value={formatPrice(profitComparison.current)}
-          accentColor="emerald"
-          icon={<Award className="w-5 h-5 text-emerald-500" />}
+          title={isLoss ? 'صافي الخسارة' : 'صافي الربح'}
+          value={isLoss ? formatPrice(Math.abs(profitComparison.current)) : formatPrice(profitComparison.current)}
+          accentColor={isLoss ? 'rose' : 'emerald'}
+          icon={isLoss ? <TrendingDown className="w-5 h-5 text-rose-500" /> : <Award className="w-5 h-5 text-emerald-500" />}
           comparison={profitComparison}
         />
         <ComparisonStatCard
@@ -400,7 +401,7 @@ export const AdminReportsPage: React.FC = () => {
           value={`%${formatNumber(profitMargin)}`}
           accentColor="purple"
           icon={<BarChart3 className="w-5 h-5 text-purple-500" />}
-          periodLabel={profitMargin > 50 ? 'معدل ممتاز' : profitMargin > 30 ? 'معدل جيد' : 'يحتاج تحسين'}
+          periodLabel={isLoss ? 'خسارة — راجع المصروفات' : profitMargin > 50 ? 'معدل ممتاز' : profitMargin > 30 ? 'معدل جيد' : 'يحتاج تحسين'}
         />
       </div>
 
@@ -412,7 +413,7 @@ export const AdminReportsPage: React.FC = () => {
         <span className="inline-flex items-center gap-1.5 py-1.5 px-3 rounded-full bg-blue-50 border border-blue-100 text-[11px] font-bold text-[#2e5b9f]">
           🛒 مشتريات مخزون: <span className="font-mono">{formatPrice(purchasesFiltered)}</span>
         </span>
-        <span className="text-[10px] text-gray-400">— صافي الربح محسوب بعد خصم الاتنين معاً</span>
+        <span className="text-[10px] text-gray-400">— صافي الربح = المبيعات − (المشتريات + المصروفات التشغيلية) • لو النتيجة بالسالب تظهر كخسارة</span>
       </div>
 
       {/* Profitability Comparison Grid */}

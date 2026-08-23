@@ -264,15 +264,17 @@ export const AttaGlowingChart: React.FC<AttaGlowingChartProps> = ({
           onClick={() => setActiveSeries((s) => ({ ...s, profit: !s.profit }))}
           className={`p-3.5 rounded-2xl border transition-all cursor-pointer text-right ${
             activeSeries.profit
-              ? 'bg-white border-emerald-200 ring-1 ring-emerald-200'
+              ? netProfit < 0
+                ? 'bg-white border-rose-200 ring-1 ring-rose-200'
+                : 'bg-white border-emerald-200 ring-1 ring-emerald-200'
               : 'bg-gray-50 border-gray-200 opacity-40'
           }`}
         >
           <div className="flex items-center justify-between mb-1.5">
-            <span className="w-3.5 h-3.5 rounded-full bg-emerald-500 shadow-sm shadow-emerald-500/30" />
-            <span className="text-sm text-gray-500 font-bold">صافي الأرباح</span>
+            <span className={`w-3.5 h-3.5 rounded-full shadow-sm ${netProfit < 0 ? 'bg-rose-500 shadow-rose-500/30' : 'bg-emerald-500 shadow-emerald-500/30'}`} />
+            <span className="text-sm text-gray-500 font-bold">{netProfit < 0 ? 'صافي الخسارة' : 'صافي الأرباح'}</span>
           </div>
-          <span className="text-2xl font-bold text-emerald-500 font-mono block">
+          <span className={`text-2xl font-bold font-mono block ${netProfit < 0 ? 'text-rose-500' : 'text-emerald-500'}`}>
             {formatPrice(netProfit)}
           </span>
         </div>
