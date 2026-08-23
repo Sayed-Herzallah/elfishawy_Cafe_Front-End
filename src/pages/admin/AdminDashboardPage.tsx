@@ -3,12 +3,15 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useNotification } from '../../contexts/NotificationContext';
 import { analyticsService, orderService, inventoryService, expenseService } from '../../services/opsService';
-import { KPIStats, ChartsData, Order, InventoryItem, Expense } from '../../types';
+import { productService } from '../../services/catalogService';
+import { KPIStats, ChartsData, Order, InventoryItem, Expense, Product } from '../../types';
 import { ReceiptModal } from '../../components/ui/ReceiptModal';
 import { LoadingSkeleton } from '../../components/ui/LoadingSkeleton';
 import { AttaGlowingChart, ChartDataPoint } from '../../components/ui/AttaGlowingChart';
 import { AttaStatCard } from '../../components/ui/AttaStatCard';
+import { ComparisonStatCard } from '../../components/ui/ComparisonStatCard';
 import { ExportModal } from '../../components/ui/ExportModal';
+import { DateRangeFilter, DateRange } from '../../components/ui/DateRangeFilter';
 import { exportElementToPdf } from '../../utils/pdfExport';
 import {
   formatPrice,
@@ -17,6 +20,11 @@ import {
   formatTime,
   formatDateTime
 } from '../../utils/formatters';
+import {
+  useSalesComparison,
+  useOrdersCountComparison,
+  useProfitComparison
+} from '../../hooks/useStatisticsComparison';
 import {
   TrendingUp,
   ReceiptText,
@@ -43,8 +51,10 @@ export const AdminDashboardPage: React.FC = () => {
   const [recentOrders, setRecentOrders] = useState<Order[]>([]);
   const [lowStockItems, setLowStockItems] = useState<InventoryItem[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [allProducts, setAllProducts] = useState<Product[]>([]);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [timeRange, setTimeRange] = useState<'today' | 'week' | 'month' | 'year'>('today');
+  const [dateRange, setDateRange] = useState<DateRange>({ from: null, to: null, preset: 'custom' });
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [isExportModalOpen, setIsExportModalOpen] = useState<boolean>(false);
@@ -52,15 +62,16 @@ export const AdminDashboardPage: React.FC = () => {
   const contentRef = useRef<HTMLDivElement>(null);
   const [isExportingPdf, setIsExportingPdf] = useState<boolean>(false);
 
-  const fetchData = async () => {
+  const fetchData = async (silent = false) => {
     try {
-      setIsLoading(true);
-      const [statsRes, chartsRes, ordersRes, invRes, expRes] = await Promise.all([
+      if (!silent) setIsLoading(true);
+      const [statsRes, chartsRes, ordersRes, invRes, expRes, prodRes] = await Promise.all([
         analyticsService.getStats(),
         analyticsService.getCharts(),
         orderService.getOrders(),
         inventoryService.listInventory({ lowStock: true }),
         expenseService.listExpenses(),
+        productService.listProducts().catch(() => null),
       ]);
 
       if (statsRes.success && statsRes.data) setStats(statsRes.data);
@@ -71,6 +82,7 @@ export const AdminDashboardPage: React.FC = () => {
       }
       if (invRes.success && invRes.data) setLowStockItems(invRes.data);
       if (expRes.success && expRes.data) setExpenses(expRes.data);
+      if (prodRes?.success && prodRes.data) setAllProducts(prodRes.data);
     } catch (err) {
       console.error('Failed to load dashboard metrics', err);
       // اعرض الخطأ للمستخدم بدل الهياكل المعلقة بصمت
@@ -83,6 +95,13 @@ export const AdminDashboardPage: React.FC = () => {
 
   useEffect(() => {
     fetchData();
+    // ⚡ تحديث ديناميكي تلقائي كل دقيقة عندما تكون الصفحة ظاهرة (بدون وميض التحميل)
+    const interval = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        fetchData(true);
+      }
+    }, 60_000);
+    return () => clearInterval(interval);
   }, []);
 
   const handleRefresh = () => {
@@ -92,10 +111,23 @@ export const AdminDashboardPage: React.FC = () => {
 
   // Note: no early return here — useMemo below must not be called conditionally (Rules of Hooks)
 
-  // Filter orders by time range
+  // Filter orders by time range (+ نطاق تاريخ مخصص من الفلتر إن وجد)
   const filteredOrders = allOrders.filter((o) => {
     const orderDate = new Date(o.createdAt);
     const now = new Date();
+
+    // ✅ توصيل فلتر التاريخ المخصص — كان معزولاً عن منطق التصفية
+    if (dateRange.from) {
+      const from = new Date(dateRange.from);
+      from.setHours(0, 0, 0, 0);
+      if (orderDate < from) return false;
+    }
+    if (dateRange.to) {
+      const to = new Date(dateRange.to);
+      to.setHours(23, 59, 59, 999);
+      if (orderDate > to) return false;
+    }
+
     if (timeRange === 'today') {
       return orderDate.toDateString() === now.toDateString();
     } else if (timeRange === 'week') {
@@ -115,10 +147,24 @@ export const AdminDashboardPage: React.FC = () => {
     .filter((o) => o.status === 'completed')
     .reduce((sum, o) => sum + o.totalAmount, 0);
 
-  const totalExpenses = expenses
+  // 🛒 فصل مصروفات الفترة: تشغيلية vs مشتريات مخزون
+  const periodExpenses = expenses
     .filter((e) => {
       const expDate = new Date(e.date || e.createdAt || '');
       const now = new Date();
+
+      // ✅ نفس فلتر التاريخ المخصص على المصروفات
+      if (dateRange.from) {
+        const from = new Date(dateRange.from);
+        from.setHours(0, 0, 0, 0);
+        if (expDate < from) return false;
+      }
+      if (dateRange.to) {
+        const to = new Date(dateRange.to);
+        to.setHours(23, 59, 59, 999);
+        if (expDate > to) return false;
+      }
+
       if (timeRange === 'today') {
         return expDate.toDateString() === now.toDateString();
       } else if (timeRange === 'week') {
@@ -131,8 +177,15 @@ export const AdminDashboardPage: React.FC = () => {
         return expDate >= yearAgo;
       }
       return true;
-    })
+    });
+
+  const totalPurchases = periodExpenses
+    .filter((e) => e.category === 'inventory')
     .reduce((sum, e) => sum + e.amount, 0);
+  const totalOperating = periodExpenses
+    .filter((e) => e.category !== 'inventory')
+    .reduce((sum, e) => sum + e.amount, 0);
+  const totalExpenses = totalOperating + totalPurchases;
 
   const ordersCount = filteredOrders.length;
   const netProfit = Math.max(0, totalSales - totalExpenses);
@@ -173,12 +226,14 @@ export const AdminDashboardPage: React.FC = () => {
     .filter((o) => o.status === 'completed')
     .reduce((sum, o) => sum + o.totalAmount, 0);
 
-  const prevExpenses = expenses
-    .filter((e) => {
-      const expDate = new Date(e.date || e.createdAt || '');
-      return expDate >= prevStart && expDate < prevEnd;
-    })
+  const prevPeriodExpenses = expenses.filter((e) => {
+    const expDate = new Date(e.date || e.createdAt || '');
+    return expDate >= prevStart && expDate < prevEnd;
+  });
+  const prevOperating = prevPeriodExpenses
+    .filter((e) => e.category !== 'inventory')
     .reduce((sum, e) => sum + e.amount, 0);
+  const prevExpenses = prevPeriodExpenses.reduce((sum, e) => sum + e.amount, 0);
 
   const prevOrdersCount = prevOrdersList.length;
   const prevNetProfit = Math.max(0, prevSales - prevExpenses);
@@ -193,34 +248,41 @@ export const AdminDashboardPage: React.FC = () => {
   const profitChange = getChangePct(netProfit, prevNetProfit);
   const ordersChange = getChangePct(ordersCount, prevOrdersCount);
 
+  // Use new comparison hooks for dynamic period comparisons
+  const salesComparison = useSalesComparison(timeRange, allOrders);
+  const ordersComparison = useOrdersCountComparison(timeRange, allOrders);
+  const profitComparison = useProfitComparison(timeRange, allOrders, expenses);
+
   // Generate multi-series Chart Data points for AttaGlowingChart
   const chartDataPoints: ChartDataPoint[] = useMemo(() => {
     if (timeRange === 'today') {
-      const timeSlots = [
-        { label: '10:00 ص', hour: 10 },
-        { label: '12:00 ظ', hour: 12 },
-        { label: '02:00 م', hour: 14 },
-        { label: '04:00 م', hour: 16 },
-        { label: '06:00 م', hour: 18 },
-        { label: '08:00 م', hour: 20 },
-        { label: '10:00 م', hour: 22 },
-        { label: '12:00 ص', hour: 24 },
-      ];
+      // ✅ يوم كامل 24 ساعة (12:00 ص → 11:00 م) بدل 10ص-12ص فقط
+      const hourLabel = (h: number) => {
+        const period = h < 12 ? 'ص' : 'م';
+        const h12 = h % 12 === 0 ? 12 : h % 12;
+        return `${String(h12).padStart(2, '0')}:00 ${period}`;
+      };
 
-      return timeSlots.map((slot, idx) => {
-        const slotOrders = filteredOrders.filter((o) => {
-          const h = new Date(o.createdAt).getHours();
-          const prevHour = idx === 0 ? 0 : timeSlots[idx - 1].hour;
-          return h >= prevHour && h < slot.hour;
-        });
+      // مصروفات اليوم فقط (لتوزيعها على ساعاتها الحقيقية)
+      const todayExpenses = expenses.filter((e) => {
+        const d = new Date(e.date || e.createdAt || '');
+        return d.toDateString() === now.toDateString();
+      });
 
+      return Array.from({ length: 24 }, (_, h) => {
+        // ✅ المبيعات من الطلبات المكتملة فقط (الملغي مش بيع)
+        const slotOrders = filteredOrders.filter((o) =>
+          o.status === 'completed' && new Date(o.createdAt).getHours() === h
+        );
         const s = slotOrders.reduce((sum, o) => sum + o.totalAmount, 0);
         const ords = slotOrders.length;
-        const exp = Math.round(totalExpenses / timeSlots.length);
+        const exp = todayExpenses
+          .filter((e) => new Date(e.date || e.createdAt || '').getHours() === h)
+          .reduce((sum, e) => sum + e.amount, 0);
         const p = Math.max(0, s - exp);
 
         return {
-          label: slot.label,
+          label: hourLabel(h),
           sales: s,
           orders: ords,
           expenses: exp,
@@ -319,10 +381,13 @@ export const AdminDashboardPage: React.FC = () => {
     order.items.forEach((item) => {
       if (!item || typeof item !== 'object') return;
       const productName = (item as any).product;
-      const pName =
-        productName && typeof productName === 'object' && typeof productName.name === 'string' && productName.name.trim()
-          ? productName.name
-          : 'منتج محذوف';
+      // ✅ نتخطى العناصر التي لا تحتوي منتجاً حقيقياً (محذوف من قاعدة البيانات)
+      // حتى لا يظهر "منتج محذوف" في قائمة أكثر المنتجات مبيعاً
+      if (!productName || typeof productName !== 'object') return;
+      const pName = typeof productName.name === 'string' && productName.name.trim()
+        ? productName.name
+        : null;
+      if (!pName) return;
       const price = Number(item.price) || 0;
       const quantity = Number(item.quantity) || 0;
       const existing = productSales.get(pName) || { name: pName, quantitySold: 0, revenueGenerated: 0 };
@@ -335,6 +400,47 @@ export const AdminDashboardPage: React.FC = () => {
   const topProducts = Array.from(productSales.values())
     .sort((a, b) => b.revenueGenerated - a.revenueGenerated)
     .slice(0, 4);
+
+  // 🛒 "بتشتري إيه بالظبط؟" — تجميع مشتريات الفترة حسب صنف المخزن المرتبط
+  const purchasesBreakdown = (() => {
+    const map = new Map<string, { name: string; amount: number; qty: number; count: number }>();
+    periodExpenses
+      .filter((e) => e.category === 'inventory')
+      .forEach((e) => {
+        const linked = e.inventoryItemLinked;
+        const isObj = typeof linked === 'object' && linked !== null;
+        const key = isObj ? linked._id : 'unlinked';
+        const name = isObj ? linked.name : 'توريدات غير مرتبطة بصنف';
+        const cur = map.get(key) || { name, amount: 0, qty: 0, count: 0 };
+        cur.amount += e.amount;
+        cur.qty += e.inventoryQuantityAdded || 0;
+        cur.count += 1;
+        map.set(key, cur);
+      });
+    return Array.from(map.values()).sort((a, b) => b.amount - a.amount);
+  })();
+
+  // 😴 المنتجات الراكدة — موجودة في المنيو لكن مبيعاتها صفر في الفترة المختارة
+  const soldProductIds = new Set<string>();
+  filteredOrders.forEach((o) => {
+    (o.items || []).forEach((it) => {
+      const p = it?.product;
+      if (p && typeof p === 'object' && p._id) soldProductIds.add(p._id);
+    });
+  });
+  const dormantProducts = allProducts.filter((p) => !soldProductIds.has(p._id));
+
+  // مقارنة المصروفات التشغيلية بالفترة السابقة (بدون مشتريات المخزن)
+  const operatingChange = getChangePct(totalOperating, prevOperating);
+  const operatingComparison = {
+    current: totalOperating,
+    previous: prevOperating,
+    changePercent: operatingChange,
+    changeAbsolute: totalOperating - prevOperating,
+    trend: (totalOperating > prevOperating ? 'up' : totalOperating < prevOperating ? 'down' : 'neutral') as 'up' | 'down' | 'neutral',
+    currentPeriodLabel: 'الفترة الحالية',
+    previousPeriodLabel: prevPeriodLabel,
+  };
 
   // PDF & CSV Export Handlers
   const handleExportPDF = async () => {
@@ -357,10 +463,11 @@ export const AdminDashboardPage: React.FC = () => {
       const csvRows = [
         ['تقرير لوحة تحكم مقهى الفيشاوي', `الفترة: ${timeRange === 'today' ? 'اليوم' : timeRange === 'week' ? 'الأسبوع' : timeRange === 'month' ? 'الشهر' : 'السنة'}`],
         ['المؤشر المالي', 'القيمة الحالية', 'قيمة الفترة السابقة', 'نسبة التغير %'],
-        ['إجمالي المبيعات', `${totalSales} ج.م`, `${prevSales} ج.م`, `${salesChange}%`],
-        ['إجمالي المصروفات', `${totalExpenses} ج.م`, `${prevExpenses} ج.م`, `${expensesChange}%`],
-        ['صافي الأرباح', `${netProfit} ج.م`, `${prevNetProfit} ج.م`, `${profitChange}%`],
-        ['حجم الطلبات', `${ordersCount} طلب`, `${prevOrdersCount} طلب`, `${ordersChange}%`],
+        ['إجمالي المبيعات', `${salesComparison.current.toLocaleString('en-US')} جنيها`, `${salesComparison.previous.toLocaleString('en-US')} جنيها`, `${salesComparison.changePercent >= 0 ? '+' : ''}${salesComparison.changePercent}%`],
+        ['المصروفات التشغيلية', `${totalOperating.toLocaleString('en-US')}جنيها`, `${prevOperating.toLocaleString('en-US')} جنيها`, `${operatingChange >= 0 ? '+' : ''}${operatingChange}%`],
+        ['مشتريات المخزون', `${totalPurchases.toLocaleString('en-US')} جنيها`, '—', '—'],
+        ['صافي الأرباح', `${profitComparison.current.toLocaleString('en-US')}  `, `${profitComparison.previous.toLocaleString('en-US')} جنيها`, `${profitComparison.changePercent >= 0 ? '+' : ''}${profitComparison.changePercent}%`],
+        ['حجم الطلبات', `${ordersComparison.current.toLocaleString('en-US')} طلب`, `${ordersComparison.previous.toLocaleString('en-US')} طلب`, `${ordersComparison.changePercent >= 0 ? '+' : ''}${ordersComparison.changePercent}%`],
       ];
 
       const csvContent = '\uFEFF' + csvRows.map((row) => row.map((val) => `"${val}"`).join(',')).join('\n');
@@ -402,7 +509,16 @@ export const AdminDashboardPage: React.FC = () => {
             <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin text-[#2e5b9f]' : ''}`} />
           </button>
 
-          {/* Time Range Selector */}
+          {/* Professional Date Range Filter */}
+          <DateRangeFilter
+            value={dateRange}
+            onChange={setDateRange}
+            maxDate={new Date()}
+            showPresets={true}
+            className="min-w-[220px]"
+          />
+
+          {/* Time Range Preset Buttons (Quick Select) */}
           <div className="bg-[#f0ebe1] p-1 rounded-2xl border border-gray-200/70 flex items-center gap-1 text-xs">
             <button
               onClick={() => setTimeRange('today')}
@@ -506,51 +622,43 @@ export const AdminDashboardPage: React.FC = () => {
         </button>
       </div>
 
-      {/* 4 Sleek Atta-Style Cards (No confusion between today and yesterday) */}
+      {/* 4 Sleek Comparison Stat Cards with dynamic period comparison */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Card 1: المبيعات */}
-        <AttaStatCard
+        <ComparisonStatCard
           title="إجمالي المبيعات"
-          value={formatPrice(totalSales)}
-                    icon={<TrendingUp className="w-6 h-6" />}
+          value={formatPrice(salesComparison.current)}
+          icon={<TrendingUp className="w-6 h-6" />}
           accentColor="blue"
-          changePct={salesChange}
-          periodLabel={timeRange === 'today' ? 'مبيعات اليوم' : timeRange === 'week' ? 'مبيعات الأسبوع' : 'مبيعات الشهر'}
-          previousValueText={`${prevPeriodLabel}: ${formatPrice(prevSales)}`}
+          comparison={salesComparison}
         />
 
-        {/* Card 2: المصروفات */}
-        <AttaStatCard
-          title="إجمالي المصروفات"
-          value={formatPrice(totalExpenses)}
-                    icon={<ReceiptText className="w-6 h-6" />}
+        {/* Card 2: المصروفات التشغيلية — منفصلة عن مشتريات المخزن */}
+        <ComparisonStatCard
+          title="المصروفات التشغيلية"
+          value={formatPrice(totalOperating)}
+          icon={<ReceiptText className="w-6 h-6" />}
           accentColor="rose"
-          changePct={expensesChange}
           invertColors
-          periodLabel={timeRange === 'today' ? 'مصروفات اليوم' : timeRange === 'week' ? 'مصروفات الأسبوع' : 'مصروفات الشهر'}
-          previousValueText={`${prevPeriodLabel}: ${formatPrice(prevExpenses)}`}
+          comparison={operatingComparison}
         />
 
         {/* Card 3: صافي الأرباح */}
-        <AttaStatCard
+        <ComparisonStatCard
           title="صافي الأرباح"
-          value={formatPrice(netProfit)}
+          value={formatPrice(profitComparison.current)}
           icon={<Coins className="w-6 h-6" />}
           accentColor="emerald"
-          changePct={profitChange}
-          periodLabel={timeRange === 'today' ? 'أرباح اليوم' : timeRange === 'week' ? 'أرباح الأسبوع' : 'أرباح الشهر'}
-          previousValueText={`${prevPeriodLabel}: ${formatPrice(prevNetProfit)}`}
+          comparison={profitComparison}
         />
 
         {/* Card 4: حجم الطلبات */}
-        <AttaStatCard
+        <ComparisonStatCard
           title="حجم الطلبات"
-          value={`${formatNumber(ordersCount)} طلب`}
+          value={`${formatNumber(ordersComparison.current)} طلب`}
           icon={<ShoppingBag className="w-6 h-6" />}
           accentColor="purple"
-          changePct={ordersChange}
-          periodLabel={timeRange === 'today' ? 'طلبات اليوم' : timeRange === 'week' ? 'طلبات الأسبوع' : 'طلبات الشهر'}
-          previousValueText={`${prevPeriodLabel}: ${formatNumber(prevOrdersCount)} طلب`}
+          comparison={ordersComparison}
         />
       </div>
 
@@ -563,7 +671,7 @@ export const AdminDashboardPage: React.FC = () => {
         totalOrders={ordersCount}
         totalExpenses={totalExpenses}
         netProfit={netProfit}
-        growthRate={salesChange}
+        growthRate={salesComparison.changePercent}
         title="مخطط نشاط ومبيعات الكافيه"
       />
 
@@ -650,6 +758,109 @@ export const AdminDashboardPage: React.FC = () => {
         </div>
       </div>
 
+      {/* Purchases Insight + Dormant Products */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+        {/* 🛒 بتشتري إيه؟ (7 cols) */}
+        <div className="lg:col-span-7 bg-white rounded-3xl border border-gray-200/80 p-5 shadow-2xs">
+          <div className="flex items-center justify-between pb-3 mb-3 border-b border-gray-100">
+            <span className="text-[11px] text-gray-400 font-mono">إجمالي الفترة: {formatPrice(totalPurchases)}</span>
+            <h3 className="font-bold text-sm text-gray-900 flex items-center gap-1.5">
+              🛒 المشتريات والتوريد — بتشتري إيه للمخزن؟
+            </h3>
+          </div>
+
+          {purchasesBreakdown.length === 0 ? (
+            <div className="text-center py-8 text-gray-400 text-xs font-bold">
+              لا توجد مشتريات مخزن مسجلة في هذه الفترة بعد.
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {purchasesBreakdown.slice(0, 5).map((pb, idx) => {
+                const pct = totalPurchases > 0 ? Math.round((pb.amount / totalPurchases) * 100) : 0;
+                return (
+                  <div
+                    key={idx}
+                    className="p-3 rounded-2xl bg-[#faf8f5] border border-gray-100 hover:border-gray-200 transition"
+                  >
+                    <div className="flex items-center justify-between gap-2 mb-1">
+                      <span className="font-mono font-bold text-[11px] text-[#2e5b9f] shrink-0">
+                        {formatPrice(pb.amount)}
+                      </span>
+                      <span className="text-xs font-bold text-gray-900 truncate max-w-[60%]">
+                        {pb.name}
+                      </span>
+                    </div>
+                    <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-gradient-to-l from-blue-400 to-[#2e5b9f] rounded-full transition-all duration-500"
+                        style={{ width: `${Math.max(6, pct)}%` }}
+                      />
+                    </div>
+                    <div className="flex items-center justify-between mt-1 text-[10px] text-gray-400 font-mono">
+                      <span>{formatNumber(pb.count)} عملية شراء</span>
+                      {pb.qty > 0 && <span>+{formatNumber(pb.qty)} وحدة دخلت المخزن</span>}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* 😴 منتجات راكدة (5 cols) */}
+        <div className="lg:col-span-5 bg-white rounded-3xl border border-gray-200/80 p-5 shadow-2xs space-y-3">
+          <div className="flex items-center justify-between pb-3 border-b border-gray-100">
+            <button
+              onClick={() => navigate('/admin/products')}
+              className="text-xs font-bold text-[#2e5b9f] hover:underline"
+            >
+              إدارة المنتجات ←
+            </button>
+            <h3 className="font-bold text-sm text-gray-900 flex items-center gap-1.5">
+              😴 منتجات مش بتتباع
+            </h3>
+          </div>
+
+          {dormantProducts.length === 0 ? (
+            <div className="text-center py-6 text-emerald-600 bg-emerald-50/50 rounded-2xl border border-emerald-100 text-xs font-bold">
+              ✓ كل منتجات المنيو اتباعت في هذه الفترة — أداء ممتاز!
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {dormantProducts.slice(0, 4).map((prod) => (
+                <div
+                  key={prod._id}
+                  className="p-3 rounded-2xl bg-slate-50/70 border border-slate-200 flex items-center justify-between text-xs"
+                >
+                  <button
+                    onClick={() => navigate('/admin/products')}
+                    className="text-[10px] font-bold text-gray-400 hover:text-[#2e5b9f]"
+                  >
+                    مراجعة ←
+                  </button>
+                  <div className="flex items-center gap-2 text-right min-w-0">
+                    <div className="min-w-0">
+                      <span className="font-bold text-gray-800 text-xs block truncate max-w-[140px]">{prod.name}</span>
+                      <span className="text-[10px] text-gray-400 font-mono">
+                        {formatPrice(prod.price)} • {prod.inStock ? 'متاح' : 'غير متاح'}
+                      </span>
+                    </div>
+                    <span className="w-7 h-7 rounded-xl bg-white border border-slate-200 flex items-center justify-center shrink-0 text-sm">
+                      💤
+                    </span>
+                  </div>
+                </div>
+              ))}
+              {dormantProducts.length > 4 && (
+                <p className="text-[10px] text-gray-400 text-center">
+                  و{formatNumber(dormantProducts.length - 4)} منتجات أخرى بدون مبيعات في الفترة.
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
       {/* Recent Orders Section */}
       <div className="bg-white rounded-3xl border border-gray-200/80 p-5 shadow-2xs">
         <div className="flex items-center justify-between pb-3 mb-3 border-b border-gray-100">
@@ -702,7 +913,7 @@ export const AdminDashboardPage: React.FC = () => {
                         {order.orderType === 'dine-in' ? `طاولة #${order.tableNumber || 1}` : 'سفري'}
                       </span>
                     </td>
-                    <td className="py-3 px-3 text-gray-500 font-mono">{formatNumber(order.items.length)} أصناف</td>
+                    <td className="py-3 px-3 text-gray-500 font-mono">{formatNumber((order.items || []).length)} أصناف</td>
                     <td className="py-3 px-3 font-bold font-mono text-[#2e5b9f]">
                       {formatPrice(order.totalAmount)}
                     </td>

@@ -17,17 +17,11 @@ interface PaginationProps {
   showPrevNext?: boolean;
   /** Always show first/last (optional, default true) */
   showFirstLast?: boolean;
-  /** Show items per page selector */
-  showItemsPerPage?: boolean;
-  /** Items per page options */
-  itemsPerPageOptions?: number[];
-  /** Callback when items per page changes */
-  onItemsPerPageChange?: (itemsPerPage: number) => void;
 }
 
 /**
  * Professional Google-style pagination with ellipsis for large data sets.
- * Features: RTL-aware, responsive, accessible, items per page selector
+ * Features: RTL-aware, responsive, accessible — arrows and page numbers only
  */
 export const Pagination: React.FC<PaginationProps> = ({
   currentPage,
@@ -37,13 +31,8 @@ export const Pagination: React.FC<PaginationProps> = ({
   maxPages = 7,
   showPrevNext = true,
   showFirstLast = true,
-  showItemsPerPage = false,
-  itemsPerPageOptions = [10, 25, 50, 100],
-  onItemsPerPageChange,
 }) => {
   const totalPages = Math.max(1, Math.ceil(totalItems / itemsPerPage));
-  const startItem = (currentPage - 1) * itemsPerPage + 1;
-  const endItem = Math.min(currentPage * itemsPerPage, totalItems);
 
   const getPageNumbers = (): (number | 'ellipsis')[] => {
     if (totalPages <= maxPages) {
@@ -72,33 +61,10 @@ export const Pagination: React.FC<PaginationProps> = ({
 
   const pages = getPageNumbers();
 
-  if (totalPages <= 1 && !showItemsPerPage) return null;
+  if (totalPages <= 1) return null;
 
   return (
-    <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mt-6 px-1">
-      {/* Items per page selector */}
-      {showItemsPerPage && onItemsPerPageChange && (
-        <div className="flex items-center gap-2 text-sm text-gray-600">
-          <span className="font-bold">عرض:</span>
-          <select
-            value={itemsPerPage}
-            onChange={(e) => onItemsPerPageChange(Number(e.target.value))}
-            className="bg-[#faf8f5] hover:bg-white focus:bg-white border border-gray-200 rounded-xl px-3 py-2 text-xs text-gray-900 focus:outline-none focus:ring-2 focus:ring-[#2e5b9f]/20 focus:border-[#2e5b9f] appearance-none cursor-pointer"
-          >
-            {itemsPerPageOptions.map((opt) => (
-              <option key={opt} value={opt}>{opt} في الصفحة</option>
-            ))}
-          </select>
-        </div>
-      )}
-
-      {/* Pagination Info */}
-      <div className="flex items-center gap-4 text-sm text-gray-500 font-mono">
-        <span className="px-3 py-1.5 bg-gray-50 rounded-lg">
-          {totalItems > 0 ? `${startItem} - ${endItem} من ${totalItems}` : 'لا توجد نتائج'}
-        </span>
-      </div>
-
+    <div className="flex items-center justify-center gap-1.5 flex-wrap mt-6 px-1">
       {/* Page Numbers */}
       <div className="flex items-center justify-center gap-1.5 flex-wrap">
         {/* First Page */}

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { expenseService, inventoryService } from '../../services/opsService';
 import { Expense, InventoryItem } from '../../types';
 import { useNotification } from '../../contexts/NotificationContext';
@@ -7,29 +7,65 @@ import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { Select } from '../../components/ui/Select';
 import { LoadingSkeleton } from '../../components/ui/LoadingSkeleton';
-import { formatPrice, formatNumber, formatDate } from '../../utils/formatters';
+import { ExportModal } from '../../components/ui/ExportModal';
+import { DateRangeFilter, toLocalDateString } from '../../components/ui/DateRangeFilter';
+import { DashboardFilterBar } from '../../components/ui/DashboardFilterBar';
+import { exportElementToPdf } from '../../utils/pdfExport';
+import { formatPrice, formatNumber, formatDate, formatTime } from '../../utils/formatters';
 import {
   Plus,
   ShoppingBag,
   FileSpreadsheet,
-  Search,
   SearchX,
   CheckCircle2,
-  Calendar,
   Receipt,
   Boxes,
-  Filter,
+  Download,
+  User,
+  Hash,
 } from 'lucide-react';
+
+/** استخراج اسم المورد من وصف الفاتورة المخزّن بصيغة [مورد: ...] */
+const parseSupplier = (desc: string): string => {
+  const m = (desc || '').match(/\[مورد:\s*([^\]]+)\]/);
+  return m ? m[1].trim() : '';
+};
+
+/** استخراج رقم الفاتورة الورقية من الوصف بصيغة (فاتورة #...) */
+const parseInvoice = (desc: string): string => {
+  const m = (desc || '').match(/\(فاتورة\s*#([^)]+)\)/);
+  return m ? m[1].trim() : '';
+};
+
+/** الوصف النظيف بدون حقن المورد والفاتورة */
+const cleanDescription = (desc: string): string =>
+  (desc || '')
+    .replace(/\[مورد:[^\]]+\]\s*/g, '')
+    .replace(/\s*\(فاتورة\s*#[^)]+\)/g, '')
+    .trim();
+
+type SearchMode = 'all' | 'desc' | 'supplier' | 'invoice' | 'item';
 
 export const CashierExpensesPage: React.FC = () => {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([]);
   const [searchQuery, setSearchQuery] = useState<string>('');
+  // 🔎 نوع البحث — نفس فكرة سجل فواتير اليوم في الكاشير
+  const [searchMode, setSearchMode] = useState<SearchMode>('all');
   const [dateFilter, setDateFilter] = useState<'all' | 'today' | 'week' | 'month'>('all');
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isAddModalOpen, setIsAddModalOpen] = useState<boolean>(false);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [formErrors, setFormErrors] = useState<{ description?: string; amount?: string; quantity?: string }>({});
+
+  // 📅 نطاق التاريخ المخصص من منتقي التاريخ الاحترافي
+  const [dateFrom, setDateFrom] = useState<string>('');
+  const [dateTo, setDateTo] = useState<string>('');
+
+  // 📤 التصدير
+  const [isExportModalOpen, setIsExportModalOpen] = useState<boolean>(false);
+  const [isExportingPdf, setIsExportingPdf] = useState<boolean>(false);
+  const contentRef = useRef<HTMLDivElement>(null);
 
   const [formData, setFormData] = useState({
     description: '',
@@ -157,29 +193,181 @@ export const CashierExpensesPage: React.FC = () => {
     }
   };
 
-  const filteredExpenses = expenses.filter((e) => {
-    const matchesSearch = e.description.toLowerCase().includes(searchQuery.trim().toLowerCase());
+  // ─── الفلترة المتقدمة والبحث السريع ─────────────────────────────────────────
 
-    let matchesDate = true;
-    if (dateFilter !== 'all') {
-      const expDate = new Date(e.date || e.createdAt || '');
-      const now = new Date();
-      if (dateFilter === 'today') {
-        matchesDate = expDate.toDateString() === now.toDateString();
-      } else if (dateFilter === 'week') {
-        const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-        matchesDate = expDate >= weekAgo;
-      } else if (dateFilter === 'month') {
-        matchesDate =
-          expDate.getMonth() === now.getMonth() && expDate.getFullYear() === now.getFullYear();
+  /** هل فيه نطاق تاريخ مخصص من منتقي التاريخ؟ (بيتقدم على الأزرار السريعة) */
+  const hasCustomRange = Boolean(dateFrom || dateTo);
+
+  /** عدد الفلاتر النشطة عشان يظهر كشارة على زرار المسح */
+  const activeFiltersCount = useMemo(() => {
+    let count = 0;
+    if (dateFrom) count++;
+    if (dateTo) count++;
+    if (searchQuery.trim()) count++;
+    if (dateFilter !== 'all' && !hasCustomRange) count++;
+    return count;
+  }, [searchQuery, dateFilter, hasCustomRange, dateFrom, dateTo]);
+
+  const getLinkedItemName = (exp: Expense): string =>
+    exp.inventoryItemLinked && typeof exp.inventoryItemLinked === 'object'
+      ? exp.inventoryItemLinked.name
+      : '';
+
+  const getLinkedItemUnit = (exp: Expense): string =>
+    exp.inventoryItemLinked && typeof exp.inventoryItemLinked === 'object'
+      ? exp.inventoryItemLinked.unit || 'وحدة'
+      : 'وحدة';
+
+  const eCreatedAt = (exp: Expense): string => exp.createdAt || exp.date || '';
+
+  const addedByName = (exp: Expense): string => {
+    if (!exp.addedBy) return '—';
+    return typeof exp.addedBy === 'string' ? 'مستخدم' : exp.addedBy.userName || '—';
+  };
+
+  const CATEGORY_LABELS: Record<string, { label: string; classes: string }> = {
+    inventory: { label: 'مشتريات مخزون', classes: 'bg-rose-50 text-rose-700 border-rose-200/60' },
+    utilities: { label: 'مرافق', classes: 'bg-cyan-50 text-cyan-700 border-cyan-200/60' },
+    salaries: { label: 'رواتب', classes: 'bg-blue-50 text-blue-700 border-blue-200/60' },
+    rent: { label: 'إيجار', classes: 'bg-purple-50 text-purple-700 border-purple-200/60' },
+    other: { label: 'أخرى', classes: 'bg-gray-100 text-gray-600 border-gray-200' },
+  };
+
+  const filteredExpenses = useMemo(() => {
+    return expenses.filter((e) => {
+      if (!e || typeof e !== 'object') return false;
+      const desc = e.description || '';
+      const q = searchQuery.trim().toLowerCase();
+      const supplier = parseSupplier(desc).toLowerCase();
+      const invoice = parseInvoice(desc).toLowerCase();
+      const itemText = (getLinkedItemName(e) || cleanDescription(desc)).toLowerCase();
+
+      let matchesSearch = true;
+      if (q) {
+        switch (searchMode) {
+          case 'desc':
+            matchesSearch = cleanDescription(desc).toLowerCase().includes(q);
+            break;
+          case 'supplier':
+            matchesSearch = supplier.includes(q);
+            break;
+          case 'invoice':
+            matchesSearch = invoice.includes(q.replace('#', '').trim());
+            break;
+          case 'item':
+            matchesSearch = itemText.includes(q);
+            break;
+          default:
+            matchesSearch =
+              desc.toLowerCase().includes(q) ||
+              itemText.includes(q) ||
+              supplier.includes(q) ||
+              invoice.includes(q.replace('#', '').trim());
+        }
       }
-    }
 
-    return matchesSearch && matchesDate;
-  });
+      // التاريخ: النطاق المخصص من منتقي التاريخ له الأولوية
+      let matchesDate = true;
+      const expDate = new Date(e.date || e.createdAt || '');
+      if (hasCustomRange) {
+        if (dateFrom) {
+          const from = new Date(`${dateFrom}T00:00:00`);
+          matchesDate = matchesDate && expDate >= from;
+        }
+        if (dateTo) {
+          const to = new Date(`${dateTo}T23:59:59.999`);
+          matchesDate = matchesDate && expDate <= to;
+        }
+      } else if (dateFilter !== 'all') {
+        const now = new Date();
+        if (dateFilter === 'today') {
+          matchesDate = expDate.toDateString() === now.toDateString();
+        } else if (dateFilter === 'week') {
+          const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+          matchesDate = expDate >= weekAgo;
+        } else if (dateFilter === 'month') {
+          matchesDate =
+            expDate.getMonth() === now.getMonth() && expDate.getFullYear() === now.getFullYear();
+        }
+      }
 
-  const totalMyExpenses = expenses.reduce((sum, e) => sum + e.amount, 0);
+      return matchesSearch && matchesDate;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expenses, searchQuery, searchMode, dateFilter, dateFrom, dateTo, hasCustomRange]);
+
+  // مؤشرات محسوبة على النتائج المفلترة (مش الكل)
+  const totalFilteredAmount = filteredExpenses.reduce((sum, e) => sum + e.amount, 0);
+  const totalFilteredQty = filteredExpenses.reduce(
+    (sum, e) => sum + (Number(e.inventoryQuantityAdded) || 0),
+    0
+  );
+
+  const resetAllFilters = () => {
+    setSearchQuery('');
+    setSearchMode('all');
+    setDateFilter('all');
+    setDateFrom('');
+    setDateTo('');
+  };
+
   const selectedLinkedItem = inventoryItems.find((i) => i._id === formData.inventoryItemLinked);
+
+  const searchModes: { id: SearchMode; label: string }[] = [
+    { id: 'all', label: 'الكل' },
+    { id: 'desc', label: 'البيان' },
+    { id: 'supplier', label: 'المورد' },
+    { id: 'invoice', label: 'رقم فاتورة' },
+    { id: 'item', label: 'الصنف' },
+  ];
+
+  // ─── إعدادات الفلتر المتقدم ──────────────────────────────────────────────────
+  // ─── تصدير PDF / CSV ────────────────────────────────────────────────────────
+  const handleExportPDF = async () => {
+    if (!contentRef.current) return;
+    try {
+      setIsExportingPdf(true);
+      showToast('جاري تجهيز ملف الـ PDF... ⏳', 'info');
+      await exportElementToPdf(contentRef.current, `تقرير_المشتريات_${new Date().toISOString().slice(0, 10)}`);
+      showToast('تم تنزيل ملف الـ PDF بنجاح ✅', 'success');
+    } catch (err) {
+      showError(err);
+    } finally {
+      setIsExportingPdf(false);
+    }
+  };
+
+  const handleExportCSV = () => {
+    try {
+      const csvRows: (string | number)[][] = [
+        ['تقرير مشتريات البضاعة والتشغيل'],
+        ['البيان', 'الفئة', 'الصنف المرتبط', 'الكمية الموردة', 'المبلغ الإجمالي', 'المورد', 'رقم الفاتورة', 'التاريخ'],
+        ...filteredExpenses.map((e) => [
+          cleanDescription(e.description),
+          e.category,
+          getLinkedItemName(e) || '—',
+          e.inventoryQuantityAdded ?? '—',
+          e.amount,
+          parseSupplier(e.description) || '—',
+          parseInvoice(e.description) || '—',
+          formatDate(e.date),
+        ]),
+      ];
+
+      const csvContent = '\uFEFF' + csvRows.map((row) => row.map((val) => `"${val}"`).join(',')).join('\n');
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.setAttribute('href', url);
+      link.setAttribute('download', `تقرير_المشتريات_${new Date().toISOString().slice(0, 10)}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      showToast('تم تصدير ملف CSV بنجاح 📊', 'success');
+    } catch (err) {
+      showError(err);
+    }
+  };
 
   return (
     <div className="space-y-5 text-right font-sans">
@@ -202,17 +390,18 @@ export const CashierExpensesPage: React.FC = () => {
           className="inline-flex items-center justify-center gap-2 bg-[#2e5b9f] hover:bg-[#244b85] text-white py-2.5 px-5 rounded-xl text-xs font-bold shadow-2xs transition cursor-pointer"
         >
           <Plus className="w-4 h-4" />
-          <span>+ تسجيل شراء بضاعة</span>
+          <span> تسجيل شراء بضاعة</span>
         </button>
       </div>
 
-      {/* KPI Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      {/* KPI Cards — على النتائج المفلترة */}
+      <div ref={contentRef} className="space-y-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="bg-white rounded-2xl border border-gray-200/80 p-4 shadow-2xs flex items-center justify-between">
           <div>
-            <span className="text-xs text-gray-500 font-bold block">إجمالي المشتريات المسجلة</span>
+            <span className="text-xs text-gray-500 font-bold block">إجمالي المشتريات (المفلترة)</span>
             <span className="text-2xl font-bold text-[#2e5b9f] font-mono mt-1 block">
-              {formatPrice(totalMyExpenses)}
+              {formatPrice(totalFilteredAmount)}
             </span>
           </div>
           <div className="w-10 h-10 rounded-xl bg-blue-50 text-[#2e5b9f] flex items-center justify-center font-bold shadow-2xs">
@@ -222,63 +411,107 @@ export const CashierExpensesPage: React.FC = () => {
 
         <div className="bg-white rounded-2xl border border-gray-200/80 p-4 shadow-2xs flex items-center justify-between">
           <div>
-            <span className="text-xs text-gray-500 font-bold block">عدد عمليات الشراء</span>
+            <span className="text-xs text-gray-500 font-bold block">عدد فواتير الشراء</span>
             <span className="text-2xl font-bold text-gray-900 font-mono mt-1 block">
-              {formatNumber(expenses.length)} فواتير
+              {formatNumber(filteredExpenses.length)} فواتير
             </span>
           </div>
           <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold shadow-2xs">
             <FileSpreadsheet className="w-5 h-5" />
           </div>
         </div>
+
+        <div className="bg-white rounded-2xl border border-gray-200/80 p-4 shadow-2xs flex items-center justify-between">
+          <div>
+            <span className="text-xs text-gray-500 font-bold block">إجمالي الكميات الموردة</span>
+            <span className="text-2xl font-bold text-emerald-600 font-mono mt-1 block">
+              + {formatNumber(totalFilteredQty)} وحدة
+            </span>
+          </div>
+          <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center font-bold shadow-2xs">
+            <Boxes className="w-5 h-5" />
+          </div>
+        </div>
       </div>
 
       {/* Expenses Table Container */}
       <div className="bg-white rounded-2xl border border-gray-200/80 shadow-2xs p-5 space-y-4">
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pb-3 border-b border-gray-100">
-          <div className="relative w-full sm:w-72">
-            <Search className="w-3.5 h-3.5 text-gray-400 absolute right-3.5 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              placeholder="ابحث في فواتير الشراء — مثال: مورد، رقم فاتورة"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full bg-[#faf8f5] border border-gray-200 rounded-xl pr-9 pl-3 py-2 text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-[#2e5b9f]"
-            />
-          </div>
-
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
-            <span className="text-[11px] font-bold text-gray-500 ml-1 flex items-center gap-1">
-              <Calendar className="w-3.5 h-3.5 text-[#2e5b9f]" /> الفترة:
+        {/* ✨ شريط الفلترة الموحّد — بحث + نوع البحث + فترات سريعة + منتقي تاريخ احترافي */}
+        <DashboardFilterBar
+          searchValue={searchQuery}
+          onSearchChange={setSearchQuery}
+          searchPlaceholder={
+            searchMode === 'supplier' ? 'اكتب اسم المورد...'
+            : searchMode === 'invoice' ? 'اكتب رقم الفاتورة...'
+            : searchMode === 'item' ? 'اكتب اسم الصنف من المخزن...'
+            : searchMode === 'desc' ? 'اكتب البيان / اسم الخامة...'
+            : 'ابحث في كل حاجة — بيان، مورد، فاتورة، صنف'
+          }
+          groupLabel="الفترة:"
+          periods={[
+            { id: 'all', label: 'الكل' },
+            { id: 'today', label: 'اليوم' },
+            { id: 'week', label: 'آخر ٧ أيام' },
+            { id: 'month', label: 'هذا الشهر' },
+          ]}
+          activePeriod={hasCustomRange ? '' : dateFilter}
+          onPeriodChange={(id) => {
+            setDateFilter(id as typeof dateFilter);
+            setDateFrom('');
+            setDateTo('');
+          }}
+          resultCount={filteredExpenses.length}
+          resultLabel="فاتورة مسجلة"
+          activeCount={activeFiltersCount}
+          onReset={resetAllFilters}
+        >
+          {/* نوع البحث: بيان / مورد / فاتورة / صنف */}
+          <div className="flex items-center gap-1 overflow-x-auto pb-0.5">
+            <span className="text-[11px] font-bold text-gray-400 ml-0.5 select-none whitespace-nowrap">
+              البحث بـ:
             </span>
-            {(
-              [
-                { id: 'all', label: 'الكل' },
-                { id: 'today', label: 'اليوم' },
-                { id: 'week', label: 'أسبوع' },
-                { id: 'month', label: 'شهر' },
-              ] as const
-            ).map((df) => (
+            {searchModes.map((m) => (
               <button
-                key={df.id}
-                onClick={() => setDateFilter(df.id)}
-                className={`py-1.5 px-2.5 rounded-lg font-bold transition whitespace-nowrap cursor-pointer ${
-                  dateFilter === df.id
-                    ? 'bg-[#2e5b9f] text-white shadow-2xs'
-                    : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
+                key={m.id}
+                onClick={() => setSearchMode(m.id)}
+                className={`py-1 px-2.5 rounded-lg text-[11px] font-bold transition whitespace-nowrap cursor-pointer ${
+                  searchMode === m.id
+                    ? 'bg-[#2e5b9f]/10 text-[#2e5b9f] border border-[#2e5b9f]/30'
+                    : 'bg-gray-50 text-gray-500 border border-transparent hover:bg-gray-100'
                 }`}
               >
-                {df.label}
+                {m.label}
               </button>
             ))}
           </div>
-        </div>
 
-        <div className="flex items-center justify-between">
-          <span className="text-xs font-mono font-bold text-gray-500">
-            {formatNumber(filteredExpenses.length)} فواتير مسجلة
-          </span>
-        </div>
+          {/* 📅 منتقي التاريخ الاحترافي — نطاق مخصص بمعاينة حية واختصارات */}
+          <DateRangeFilter
+            value={{
+              from: dateFrom ? new Date(`${dateFrom}T00:00:00`) : null,
+              to: dateTo ? new Date(`${dateTo}T00:00:00`) : null,
+              preset: 'custom',
+            }}
+            onChange={(range) => {
+              setDateFrom(range.from ? toLocalDateString(range.from) : '');
+              setDateTo(range.to ? toLocalDateString(range.to) : '');
+              if (range.from || range.to) setDateFilter('all');
+            }}
+            maxDate={new Date()}
+            showPresets
+            className="w-full sm:w-[270px]"
+          />
+
+          {/* 📤 تصدير PDF / CSV */}
+          <button
+            onClick={() => setIsExportModalOpen(true)}
+            disabled={isExportingPdf}
+            className="inline-flex items-center justify-center gap-1.5 py-2 px-3.5 rounded-xl text-xs font-bold bg-white border border-gray-200 text-[#2e5b9f] hover:bg-blue-50/50 transition cursor-pointer disabled:opacity-60"
+          >
+            <Download className="w-3.5 h-3.5" />
+            <span>{isExportingPdf ? 'جاري التجهيز...' : 'تصدير السجل'}</span>
+          </button>
+        </DashboardFilterBar>
 
         {isLoading ? (
           <LoadingSkeleton type="table" count={5} />
@@ -292,19 +525,51 @@ export const CashierExpensesPage: React.FC = () => {
           </div>
         ) : (
           <>
-            {/* Mobile View: Cards */}
+            {/* Mobile View: Cards — تفاصيل كاملة: بيان، مورد، فاتورة، صنف، سعر وحدة */}
             <div className="space-y-3 md:hidden">
-              {filteredExpenses.map((exp) => (
+              {filteredExpenses.map((exp) => {
+                const supplier = parseSupplier(exp.description);
+                const invoice = parseInvoice(exp.description);
+                const unitPrice = exp.inventoryQuantityAdded
+                  ? Number(exp.amount) / Number(exp.inventoryQuantityAdded)
+                  : 0;
+                return (
                 <div key={exp._id} className="p-4 bg-[#faf8f5]/60 rounded-2xl border border-gray-100 shadow-3xs text-right space-y-3">
-                  <div className="flex justify-between items-start">
-                    <span className="font-bold text-gray-900 text-xs">
-                      {exp.description}
-                    </span>
-                    <span className="inline-flex items-center gap-1 py-1 px-2.5 bg-blue-50 text-[#2e5b9f] text-[10px] font-bold rounded-lg">
+                  <div className="flex justify-between items-start gap-2">
+                    <div className="min-w-0">
+                      <span className="font-bold text-gray-900 text-xs block truncate">
+                        {cleanDescription(exp.description)}
+                      </span>
+                      {getLinkedItemName(exp) && (
+                        <span className="inline-flex items-center gap-1 mt-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200/60 px-2 py-0.5 rounded-md">
+                          <Boxes className="w-3 h-3" />
+                          {getLinkedItemName(exp)}
+                        </span>
+                      )}
+                    </div>
+                    <span className="inline-flex items-center gap-1 py-1 px-2.5 bg-blue-50 text-[#2e5b9f] text-[10px] font-bold rounded-lg shrink-0">
                       <CheckCircle2 className="w-3 h-3" />
                       <span>تمت الزيادة</span>
                     </span>
                   </div>
+
+                  {(supplier || invoice) && (
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {supplier && (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-bold text-purple-700 bg-purple-50 border border-purple-200/60 px-2 py-0.5 rounded-md">
+                          <User className="w-3 h-3" />
+                          مورد: {supplier}
+                        </span>
+                      )}
+                      {invoice && (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200/60 px-2 py-0.5 rounded-md">
+                          <Hash className="w-3 h-3" />
+                          فاتورة #{invoice}
+                        </span>
+                      )}
+                    </div>
+                  )}
+
                   <div className="grid grid-cols-2 gap-2 pt-2 border-t border-gray-100 text-[11px] text-gray-500">
                     <div>
                       <span className="block text-[10px] text-gray-400">المبلغ</span>
@@ -313,55 +578,122 @@ export const CashierExpensesPage: React.FC = () => {
                     <div>
                       <span className="block text-[10px] text-gray-400">الكمية الموردة</span>
                       <span className="font-mono text-xs text-gray-800">
-                        {exp.inventoryQuantityAdded ? `+ ${formatNumber(exp.inventoryQuantityAdded)} وحدة` : '—'}
+                        {exp.inventoryQuantityAdded
+                          ? `+ ${formatNumber(exp.inventoryQuantityAdded)} ${getLinkedItemUnit(exp)}`
+                          : '—'}
                       </span>
                     </div>
-                    <div className="col-span-2">
+                    <div>
+                      <span className="block text-[10px] text-gray-400">سعر الوحدة</span>
+                      <span className="font-mono text-xs text-gray-800">
+                        {unitPrice > 0 ? formatPrice(unitPrice) : '—'}
+                      </span>
+                    </div>
+                    <div>
                       <span className="block text-[10px] text-gray-400">التاريخ</span>
-                      <span className="font-mono text-gray-700">{formatDate(exp.date)}</span>
+                      <span className="font-mono text-gray-700">
+                        {formatDate(exp.date)} • {formatTime(eCreatedAt(exp))}
+                      </span>
                     </div>
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
 
-            {/* Desktop View: Table */}
+            {/* Desktop View: Table — أعمدة غنية: بيان، صنف، فئة، سعر وحدة، كمية، مورد، فاتورة، بواسطة */}
             <div className="hidden md:block overflow-x-auto">
               <table className="w-full text-right border-collapse text-xs">
                 <thead>
                   <tr className="border-b border-gray-100 text-gray-400 font-semibold">
-                    <th className="pb-3 px-3">بيان الشراء والصنف</th>
-                    <th className="pb-3 px-3">المبلغ الإجمالي</th>
+                    <th className="pb-3 px-3">البيان والصنف</th>
+                    <th className="pb-3 px-3">الفئة</th>
+                    <th className="pb-3 px-3">سعر الوحدة</th>
                     <th className="pb-3 px-3">الكمية الموردة</th>
+                    <th className="pb-3 px-3">المبلغ الإجمالي</th>
+                    <th className="pb-3 px-3">المورد / الفاتورة</th>
                     <th className="pb-3 px-3">التاريخ</th>
+                    <th className="pb-3 px-3">بواسطة</th>
                     <th className="pb-3 px-3 text-left">الحالة</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100 text-gray-800">
-                  {filteredExpenses.map((exp) => (
+                  {filteredExpenses.map((exp) => {
+                    const supplier = parseSupplier(exp.description);
+                    const invoice = parseInvoice(exp.description);
+                    const unitPrice = exp.inventoryQuantityAdded
+                      ? Number(exp.amount) / Number(exp.inventoryQuantityAdded)
+                      : 0;
+                    const catMeta = CATEGORY_LABELS[exp.category] || CATEGORY_LABELS.other;
+                    return (
                     <tr key={exp._id} className="hover:bg-[#faf8f5]/80 transition">
+                      <td className="py-3.5 px-3 min-w-[160px]">
+                        <span className="font-bold text-gray-900 block text-xs truncate max-w-[220px]">
+                          {cleanDescription(exp.description)}
+                        </span>
+                        {getLinkedItemName(exp) && (
+                          <span className="inline-flex items-center gap-1 mt-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200/60 px-2 py-0.5 rounded-md">
+                            <Boxes className="w-3 h-3" />
+                            {getLinkedItemName(exp)}
+                          </span>
+                        )}
+                      </td>
+
                       <td className="py-3.5 px-3">
-                        <span className="font-bold text-gray-900 block text-xs">
-                          {exp.description}
+                        <span className={`inline-flex items-center py-1 px-2 border font-bold rounded-lg text-[11px] ${catMeta.classes}`}>
+                          {catMeta.label}
                         </span>
                       </td>
 
-                      <td className="py-3.5 px-3 font-bold font-mono text-sm text-[#2e5b9f]">
-                        {formatPrice(exp.amount)}
+                      <td className="py-3.5 px-3 font-mono text-xs text-gray-700 whitespace-nowrap">
+                        {unitPrice > 0 ? formatPrice(unitPrice) : '—'}
                       </td>
 
                       <td className="py-3.5 px-3">
                         {exp.inventoryQuantityAdded ? (
-                          <span className="inline-flex items-center py-1 px-2.5 bg-emerald-50 text-emerald-800 font-bold rounded-lg text-xs">
-                            + {formatNumber(exp.inventoryQuantityAdded)} وحدة
+                          <span className="inline-flex items-center py-1 px-2.5 bg-emerald-50 text-emerald-800 font-bold rounded-lg text-xs whitespace-nowrap">
+                            + {formatNumber(exp.inventoryQuantityAdded)} {getLinkedItemUnit(exp)}
                           </span>
                         ) : (
                           <span className="text-gray-400 font-mono">—</span>
                         )}
                       </td>
 
-                      <td className="py-3.5 px-3 font-mono text-xs text-gray-500">
+                      <td className="py-3.5 px-3 font-bold font-mono text-sm text-[#2e5b9f] whitespace-nowrap">
+                        {formatPrice(exp.amount)}
+                      </td>
+
+                      <td className="py-3.5 px-3 min-w-[150px]">
+                        {supplier || invoice ? (
+                          <div className="flex flex-col gap-1 items-start">
+                            {supplier && (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-bold text-purple-700 bg-purple-50 border border-purple-200/60 px-2 py-0.5 rounded-md">
+                                <User className="w-3 h-3" />
+                                {supplier}
+                              </span>
+                            )}
+                            {invoice && (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200/60 px-2 py-0.5 rounded-md">
+                                <Hash className="w-3 h-3" />
+                                #{invoice}
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-gray-400 font-mono">—</span>
+                        )}
+                      </td>
+
+                      <td className="py-3.5 px-3 font-mono text-xs text-gray-500 whitespace-nowrap">
                         {formatDate(exp.date)}
+                        <span className="block text-[10px] text-gray-400">{formatTime(eCreatedAt(exp))}</span>
+                      </td>
+
+                      <td className="py-3.5 px-3 text-xs text-gray-600 font-bold whitespace-nowrap">
+                        <span className="inline-flex items-center gap-1">
+                          <User className="w-3 h-3 text-gray-400" />
+                          {addedByName(exp)}
+                        </span>
                       </td>
 
                       <td className="py-3.5 px-3 text-left">
@@ -371,13 +703,25 @@ export const CashierExpensesPage: React.FC = () => {
                         </span>
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
           </>
         )}
       </div>
+      </div>{/* نهاية محتوى تصدير الـ PDF */}
+
+      {/* 📤 اختيار صيغة التصدير */}
+      <ExportModal
+        isOpen={isExportModalOpen}
+        onClose={() => setIsExportModalOpen(false)}
+        onExportPDF={handleExportPDF}
+        onExportCSV={handleExportCSV}
+        title="تصدير سجل المشتريات"
+        periodLabel="الفترة المفلترة"
+      />
 
       {/* Add Modal */}
       <Modal
@@ -440,7 +784,7 @@ export const CashierExpensesPage: React.FC = () => {
             />
 
             <Input
-              label="سعر الوحدة (ج.م)"
+              label="سعر الوحدة (جنيها)"
               type="number"
               min="0.1"
               step="any"
@@ -451,7 +795,7 @@ export const CashierExpensesPage: React.FC = () => {
           </div>
 
           <Input
-            label="المبلغ الإجمالي للفاتورة (ج.م) *"
+            label="المبلغ الإجمالي للفاتورة (جنيها) *"
             type="number"
             min="1"
             placeholder="المبلغ الإجمالي"

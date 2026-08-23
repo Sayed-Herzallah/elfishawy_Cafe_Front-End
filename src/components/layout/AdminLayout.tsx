@@ -164,12 +164,12 @@ export const AdminLayout: React.FC = () => {
               {getPageTitle()}
             </span>
           </div>
-          <button
+          {/* <button
             onClick={() => navigate("/pos")}
             className="inline-flex items-center gap-1.5 bg-[#2e5b9f] hover:bg-[#244b85] text-white py-1.5 px-3 rounded-xl text-xs font-bold transition shadow-2xs cursor-pointer shrink-0 whitespace-nowrap"
           >
             <span>شاشة الكاشير ←</span>
-          </button>
+          </button> */}
         </header>
 
         <main className="flex-1 p-4 md:p-6 w-full min-w-0">

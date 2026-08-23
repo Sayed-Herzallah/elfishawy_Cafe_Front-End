@@ -1,15 +1,17 @@
-import React, { useState, useEffect, useMemo } from 'react';
+﻿import React, { useState, useEffect, useMemo } from 'react';
 import { expenseService, inventoryService } from '../../services/opsService';
 import { Expense, InventoryItem, ExpenseCategory } from '../../types';
 import { useNotification } from '../../contexts/NotificationContext';
 import { StatCard } from '../../components/ui/StatCard';
+import { ComparisonStatCard } from '../../components/ui/ComparisonStatCard';
+import { DateRangeFilter, DateRange, toLocalDateString } from '../../components/ui/DateRangeFilter';
+import { DashboardFilterBar } from '../../components/ui/DashboardFilterBar';
 import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { Select } from '../../components/ui/Select';
 import { LoadingSkeleton } from '../../components/ui/LoadingSkeleton';
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
-import { FilterDialog } from '../../components/ui/FilterDialog';
 import { Pagination } from '../../components/ui/Pagination';
 import { ProfessionalCard, ExpenseCard } from '../../components/ui/ProfessionalCard';
 import { formatPrice, formatNumber, formatDate } from '../../utils/formatters';
@@ -20,7 +22,6 @@ import {
   Trash2,
   PieChart,
   Calendar,
-  Search,
   Filter,
   ChevronLeft,
   MoreVertical,
@@ -28,6 +29,9 @@ import {
   Edit2,
   FileText,
   User,
+  X,
+  Boxes,
+  CheckCircle2,
 } from 'lucide-react';
 
 export const AdminExpensesPage: React.FC = () => {
@@ -72,11 +76,11 @@ export const AdminExpensesPage: React.FC = () => {
   const [editFormErrors, setEditFormErrors] = useState<{ description?: string; amount?: string; inventoryQuantityAdded?: string }>({});
   const [isEditFormSubmitted, setIsEditFormSubmitted] = useState<boolean>(false);
 
-  // Filter Dialog
-  const [isFilterDialogOpen, setIsFilterDialogOpen] = useState(false);
+  // 🛒 فصل المشتريات عن المصروفات التشغيلية — تبويبين مستقلين بإحصائيات مختلفة
+  const [viewMode, setViewMode] = useState<'operational' | 'purchases'>('operational');
 
   // Pagination
-  const [itemsPerPage, setItemsPerPage] = useState<number>(10);
+  const [itemsPerPage] = useState<number>(10);
   const [currentPage, setCurrentPage] = useState<number>(1);
 
   const { showToast, showError } = useNotification();
@@ -111,77 +115,12 @@ export const AdminExpensesPage: React.FC = () => {
     setCurrentPage(1);
   }, [categoryFilter, dateFilter, searchQuery, dateFrom, dateTo]);
 
-  // Filter Dialog Config
-  const filterDialogConfig = {
-    title: 'تصفية المصروفات',
-    fields: [
-      {
-        name: 'search',
-        label: 'بحث',
-        type: 'input' as const,
-        placeholder: 'بيان المصروف...',
-        defaultValue: searchQuery,
-      },
-      {
-        name: 'categoryFilter',
-        label: 'الفئة',
-        type: 'select' as const,
-        options: [
-          { value: 'all', label: 'الكل' },
-          { value: 'inventory', label: 'المواد الخام والمخزون' },
-          { value: 'salaries', label: 'الرواتب والأجور' },
-          { value: 'utilities', label: 'المرافق والخدمات' },
-          { value: 'rent', label: 'الإيجار والمقر' },
-          { value: 'marketing', label: 'التسويق والدعاية' },
-          { value: 'maintenance', label: 'الصيانة' },
-          { value: 'other', label: 'مصاريف أخرى' },
-        ],
-        defaultValue: categoryFilter,
-      },
-      {
-        name: 'dateFilter',
-        label: 'فترة سريعة',
-        type: 'select' as const,
-        options: [
-          { value: 'all', label: 'الكل' },
-          { value: 'today', label: 'اليوم' },
-          { value: 'week', label: 'أسبوع' },
-          { value: 'month', label: 'شهر' },
-        ],
-        defaultValue: dateFilter,
-      },
-      {
-        name: 'dateFrom',
-        label: 'من تاريخ',
-        type: 'date' as const,
-        defaultValue: dateFrom,
-      },
-      {
-        name: 'dateTo',
-        label: 'إلى تاريخ',
-        type: 'date' as const,
-        defaultValue: dateTo,
-      },
-    ],
-    activeFiltersCount: (searchQuery ? 1 : 0) + (categoryFilter !== 'all' ? 1 : 0) + (dateFilter !== 'all' ? 1 : 0) + (dateFrom ? 1 : 0) + (dateTo ? 1 : 0),
-  };
-
-  const handleFilterApply = (values: any) => {
-    if (values.search !== undefined) setSearchQuery(values.search);
-    if (values.categoryFilter !== undefined) setCategoryFilter(values.categoryFilter);
-    if (values.dateFilter !== undefined) setDateFilter(values.dateFilter);
-    if (values.dateFrom !== undefined) setDateFrom(values.dateFrom);
-    if (values.dateTo !== undefined) setDateTo(values.dateTo);
-    setIsFilterDialogOpen(false);
-  };
-
   const handleFilterReset = () => {
     setSearchQuery('');
     setCategoryFilter('all');
     setDateFilter('all');
     setDateFrom('');
     setDateTo('');
-    setIsFilterDialogOpen(false);
   };
 
   const handleCreateExpense = async (e: React.FormEvent) => {
@@ -317,34 +256,21 @@ export const AdminExpensesPage: React.FC = () => {
     }
   };
 
+  // 🛒 فصل القيود: مشتريات المخزون (توريدات) vs مصروفات تشغيلية
+  const purchaseEntries = useMemo(() => expenses.filter((e) => e.category === 'inventory'), [expenses]);
+  const operationalEntries = useMemo(() => expenses.filter((e) => e.category !== 'inventory'), [expenses]);
+  const activeEntries = viewMode === 'purchases' ? purchaseEntries : operationalEntries;
+
+  // إجمالي عام لكل المدفوعات — مرجع ثابت للعنوان الفرعي فقط، الإحصائيات بتتحسب من المفلتر
   const totalExpenses = expenses.reduce((sum, e) => sum + e.amount, 0);
-  const todayExpenses = expenses
-    .filter((e) => new Date(e.date).toDateString() === new Date().toDateString())
-    .reduce((s, e) => s + e.amount, 0);
 
   const categoryLabels: Record<ExpenseCategory, string> = {
     inventory: 'المواد الخام والمخزون',
     salaries: 'الرواتب والأجور',
     utilities: 'المرافق والخدمات',
     rent: 'الإيجار والمقر',
-    other: 'مصاريف أخرى ونثريات',
+    other: 'مصاريف أخرى ',
   };
-
-  // Dynamic category breakdown
-  const categoryTotals = expenses.reduce((acc, e) => {
-    acc[e.category] = (acc[e.category] || 0) + e.amount;
-    return acc;
-  }, {} as Record<string, number>);
-
-  const categoryPercentages = Object.entries(categoryTotals)
-    .map(([cat, amount]) => ({
-      category: cat as ExpenseCategory,
-      amount,
-      percentage: totalExpenses > 0 ? Math.round((amount / totalExpenses) * 100) : 0,
-    }))
-    .sort((a, b) => b.amount - a.amount);
-
-  const topCategory = categoryPercentages[0];
 
   const categoryColors: Record<ExpenseCategory, string> = {
     inventory: 'bg-[#2e5b9f]',
@@ -354,12 +280,25 @@ export const AdminExpensesPage: React.FC = () => {
     other: 'bg-[#f97316]',
   };
 
-  const filteredExpenses = expenses.filter((e) => {
+  // هل فيه نطاق تاريخ مخصص من منتقي التاريخ؟ (بيتقدم على الفترات السريعة)
+  const hasCustomRange = Boolean(dateFrom || dateTo);
+
+  const filteredExpenses = activeEntries.filter((e) => {
     const matchesCategory = categoryFilter === 'all' || e.category === categoryFilter;
 
     let matchesDate = true;
-    if (dateFilter !== 'all') {
-      const expDate = new Date(e.date || e.createdAt);
+    const expDate = new Date(e.date || e.createdAt);
+
+    // ✅ النطاق المخصص (منتقي التاريخ الاحترافي) — له الأولوية دائماً
+    if (dateFrom) {
+      matchesDate = matchesDate && expDate >= new Date(`${dateFrom}T00:00:00`);
+    }
+    if (dateTo) {
+      matchesDate = matchesDate && expDate <= new Date(`${dateTo}T23:59:59.999`);
+    }
+
+    // الفترات السريعة
+    if (matchesDate && dateFilter !== 'all') {
       const now = new Date();
       if (dateFilter === 'today') {
         matchesDate = expDate.toDateString() === now.toDateString();
@@ -383,6 +322,47 @@ export const AdminExpensesPage: React.FC = () => {
     return matchesCategory && matchesDate && matchesSearch;
   });
 
+  // 📊 كل الإحصائيات بتتحسب من النتائج المفلترة المعروضة فعلاً — مش من كل السجلات
+  const shownTotal = filteredExpenses.reduce((s, e) => s + e.amount, 0);
+  const todayKey = new Date().toDateString();
+  const shownTodayTotal = filteredExpenses
+    .filter((e) => new Date(e.date || e.createdAt).toDateString() === todayKey)
+    .reduce((s, e) => s + e.amount, 0);
+  const shownUnits = filteredExpenses.reduce((s, e) => s + (e.inventoryQuantityAdded || 0), 0);
+
+  // 🛒 "بتشتري إيه بالظبط؟" — تجميع المشتريات المعروضة حسب صنف المخزن المرتبط
+  const shownPurchaseBreakdown = useMemo(() => {
+    const map = new Map<string, { name: string; amount: number; qty: number; count: number }>();
+    filteredExpenses.forEach((e) => {
+      const linked = e.inventoryItemLinked;
+      const isObj = typeof linked === 'object' && linked !== null;
+      const key = isObj ? (linked as InventoryItem)._id : 'unlinked';
+      const name = isObj ? (linked as InventoryItem).name : 'توريدات غير مرتبطة بصنف';
+      const cur = map.get(key) || { name, amount: 0, qty: 0, count: 0 };
+      cur.amount += e.amount;
+      cur.qty += e.inventoryQuantityAdded || 0;
+      cur.count += 1;
+      map.set(key, cur);
+    });
+    return Array.from(map.values()).sort((a, b) => b.amount - a.amount);
+  }, [filteredExpenses]);
+
+  // توزيع الفئات المعروضة نسبياً على إجمالي المعروض
+  const shownCategoryTotals = filteredExpenses.reduce((acc, e) => {
+    acc[e.category] = (acc[e.category] || 0) + e.amount;
+    return acc;
+  }, {} as Record<string, number>);
+
+  const shownCategoryBreakdown = Object.entries(shownCategoryTotals)
+    .map(([cat, amount]) => ({
+      category: cat as ExpenseCategory,
+      amount,
+      percentage: shownTotal > 0 ? Math.round((amount / shownTotal) * 100) : 0,
+    }))
+    .sort((a, b) => b.amount - a.amount);
+
+  const topCategory = shownCategoryBreakdown[0];
+
   // Pagination Logic
   const totalPages = Math.ceil(filteredExpenses.length / itemsPerPage) || 1;
   const startIndex = (currentPage - 1) * itemsPerPage;
@@ -402,119 +382,177 @@ export const AdminExpensesPage: React.FC = () => {
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-2 border-b border-gray-200/60">
         <div>
           <h1 className="text-2xl font-bold font-arabic-heading text-gray-900">
-            سجل المصروفات والتشغيل
+            {viewMode === 'purchases' ? '🛒 سجل المشتريات والتوريدات' : 'سجل المصروفات والتشغيل'}
           </h1>
           <p className="text-xs text-gray-500 mt-0.5">
-            متابعة فواتير التوريد، الرواتب، الإيجارات، وتكلفة المواد الخام.
+            {viewMode === 'purchases'
+              ? 'كل اللي بتشتريه للمخزن — خامات وعبوات ومستلزمات — بكمياتها وتكاليفها الفعلية.'
+              : 'الرواتب، الإيجارات، المرافق والمصاريف التشغيلية — منفصلة تماماً عن مشتريات المخزن.'}
           </p>
         </div>
 
         <Button
           onClick={() => {
             setFormErrors({});
+            // فتح النافذة بفئة مناسبة للتبويب الحالي
+            setFormData((prev) => ({
+              ...prev,
+              category: viewMode === 'purchases' ? 'inventory' : 'other',
+              inventoryItemLinked: viewMode === 'purchases' ? (inventoryItems[0]?._id || prev.inventoryItemLinked) : prev.inventoryItemLinked,
+            }));
             setIsAddModalOpen(true);
-            showToast('تم فتح نافذة تسجيل مصروف جديد', 'info');
+            showToast(viewMode === 'purchases' ? 'تم فتح نافذة تسجيل توريد جديد' : 'تم فتح نافذة تسجيل مصروف جديد', 'info');
           }}
           variant="primary"
           leftIcon={<Plus className="w-4 h-4 ml-1.5" />}
           className="bg-[#2e5b9f]"
         >
-          تسجيل مصروف جديد
+          {viewMode === 'purchases' ? 'تسجيل توريد / شراء جديد' : 'تسجيل مصروف جديد'}
         </Button>
       </div>
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard
-          title="إجمالي المصروفات"
-          value={formatPrice(totalExpenses)}
-          icon={<ReceiptText className="w-5 h-5 text-[#9f1239]" />}
-          variant="pink"
-        />
-        <StatCard
-          title="مصروفات اليوم"
-          value={formatPrice(todayExpenses)}
-          icon={<DollarSign className="w-5 h-5 text-gray-500" />}
-          variant="neutral"
-        />
-        <StatCard
-          title="أكبر فئة مصروفات"
-          value={topCategory ? `${categoryLabels[topCategory.category]} (${formatNumber(topCategory.percentage)}%)` : '—'}
-          icon={<PieChart className="w-5 h-5 text-[#2e5b9f]" />}
-          variant="blue"
-        />
-        <StatCard
-          title="عدد القيود المسجلة"
-          value={`${formatNumber(expenses.length)} قيد`}
-          icon={<Calendar className="w-5 h-5 text-gray-500" />}
-          variant="neutral"
-        />
+      {/* Tabs: فصل كامل بين المصروفات التشغيلية والمشتريات */}
+      <div className="bg-[#f0ebe1] p-1 rounded-2xl border border-gray-200/70 flex items-center gap-1 text-xs w-fit max-w-full overflow-x-auto">
+        <button
+          onClick={() => setViewMode('operational')}
+          className={`inline-flex items-center gap-1.5 py-2 px-4 rounded-xl font-bold whitespace-nowrap transition cursor-pointer ${
+            viewMode === 'operational'
+              ? 'bg-white text-[#2e5b9f] shadow-sm'
+              : 'text-gray-600 hover:text-gray-900'
+          }`}
+        >
+          <ReceiptText className="w-3.5 h-3.5" />
+          المصروفات التشغيلية
+          <span className={`font-mono text-[10px] px-1.5 py-0.5 rounded-full ${viewMode === 'operational' ? 'bg-blue-50 text-[#2e5b9f]' : 'bg-black/5 text-gray-500'}`}>
+            {formatNumber(operationalEntries.length)}
+          </span>
+        </button>
+        <button
+          onClick={() => setViewMode('purchases')}
+          className={`inline-flex items-center gap-1.5 py-2 px-4 rounded-xl font-bold whitespace-nowrap transition cursor-pointer ${
+            viewMode === 'purchases'
+              ? 'bg-white text-[#2e5b9f] shadow-sm'
+              : 'text-gray-600 hover:text-gray-900'
+          }`}
+        >
+          🛒 المشتريات والتوريدات
+          <span className={`font-mono text-[10px] px-1.5 py-0.5 rounded-full ${viewMode === 'purchases' ? 'bg-blue-50 text-[#2e5b9f]' : 'bg-black/5 text-gray-500'}`}>
+            {formatNumber(purchaseEntries.length)}
+          </span>
+        </button>
       </div>
+
+      {/* Stats Cards — مختلفة لكل تبويب */}
+      {viewMode === 'purchases' ? (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <StatCard
+            title="إجمالي المشتريات"
+            value={formatPrice(shownTotal)}
+            subtitle={`من إجمالي ${formatPrice(totalExpenses)} مدفوعات`}
+            icon={<Boxes className="w-5 h-5 text-[#2e5b9f]" />}
+            variant="blue"
+          />
+          <StatCard
+            title="مشتريات اليوم"
+            value={formatPrice(shownTodayTotal)}
+            subtitle="توريدات مسجلة النهاردة"
+            icon={<Calendar className="w-5 h-5 text-gray-500" />}
+            variant="neutral"
+          />
+          <StatCard
+            title="أكثر صنف بتشتريه"
+            value={shownPurchaseBreakdown[0]?.name || '—'}
+            subtitle={shownPurchaseBreakdown[0] ? `${formatPrice(shownPurchaseBreakdown[0].amount)} • ${formatNumber(shownPurchaseBreakdown[0].count)} توريدة` : undefined}
+            icon={<PieChart className="w-5 h-5 text-emerald-600" />}
+            variant="neutral"
+          />
+          <StatCard
+            title="إجمالي الكميات المشتراة"
+            value={`${formatNumber(shownUnits)} وحدة`}
+            subtitle={`${formatNumber(purchaseEntries.length)} قيد توريد`}
+            icon={<CheckCircle2 className="w-5 h-5 text-emerald-600" />}
+            variant="neutral"
+          />
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <StatCard
+            title="المصروفات التشغيلية"
+            value={formatPrice(shownTotal)}
+            subtitle="بدون مشتريات المخزن"
+            icon={<ReceiptText className="w-5 h-5 text-[#9f1239]" />}
+            variant="pink"
+          />
+          <StatCard
+            title="مصروفات اليوم"
+            value={formatPrice(shownTodayTotal)}
+            icon={<DollarSign className="w-5 h-5 text-gray-500" />}
+            variant="neutral"
+          />
+          <StatCard
+            title="أكبر فئة تشغيلية"
+            value={topCategory && topCategory.category !== 'inventory' ? `${categoryLabels[topCategory.category]} (${formatNumber(topCategory.percentage)}%)` : '—'}
+            icon={<PieChart className="w-5 h-5 text-[#2e5b9f]" />}
+            variant="blue"
+          />
+          <StatCard
+            title="عدد القيود المسجلة"
+            value={`${formatNumber(filteredExpenses.length)} قيد`}
+            icon={<Calendar className="w-5 h-5 text-gray-500" />}
+            variant="neutral"
+          />
+        </div>
+      )}
 
       {/* Main 2-Column Grid - RTL: Content on right (order-1), Sidebar on left (order-2) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* Main Content: Expenses Table (8 cols) - Right side visually */}
         <div className="lg:col-span-8 lg:order-1 bg-white rounded-2xl border border-gray-200/80 p-6 shadow-2xs space-y-4">
-          {/* Search and Period Filter Header */}
-          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 w-full">
-            {/* Search Box */}
-            <div className="relative flex-1">
-              <Search className="w-4 h-4 text-gray-400 absolute right-3.5 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                placeholder="ابحث في المصروفات — مثال: بن، صيانة، كهرباء"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full bg-[#faf8f5] hover:bg-white focus:bg-white border border-gray-200 rounded-xl pr-10 pl-3 py-2.5 text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-[#2e5b9f]/20 focus:border-[#2e5b9f]"
-              />
-            </div>
-
-            {/* Action Buttons */}
-            <div className="flex items-center gap-1.5 shrink-0">
-              <button
-                onClick={() => setIsFilterDialogOpen(true)}
-                className="inline-flex items-center gap-1.5 px-3 py-2 border border-gray-200/60 rounded-xl text-xs font-bold text-gray-700 hover:bg-[#faf8f5] transition cursor-pointer"
-              >
-                <Filter className="w-3.5 h-3.5 text-[#2e5b9f]" />
-                تصفية متقدمة
-              </button>
-              {(categoryFilter !== 'all' || dateFilter !== 'all' || searchQuery) && (
-                <button
-                  onClick={handleFilterReset}
-                  className="flex items-center justify-center gap-1 py-2 px-3 border border-gray-200/60 rounded-xl text-xs font-bold text-rose-600 hover:bg-[#fff5f5] transition cursor-pointer"
-                >
-                  مسح الفلاتر
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* Period Filter Pills */}
-          <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-gray-100">
-            <span className="text-[11px] font-bold text-gray-500 ml-1 flex items-center gap-1">
-              <Calendar className="w-3.5 h-3.5 text-[#2e5b9f]" /> الفترة:
-            </span>
-            {(
-              [
-                { id: 'all', label: 'الكل' },
-                { id: 'today', label: 'اليوم' },
-                { id: 'week', label: 'أسبوع' },
-                { id: 'month', label: 'شهر' },
-              ] as const
-            ).map((df) => (
-              <button
-                key={df.id}
-                onClick={() => setDateFilter(df.id)}
-                className={`py-1 px-3 rounded-xl text-xs font-bold transition whitespace-nowrap cursor-pointer ${
-                  dateFilter === df.id
-                    ? 'bg-gray-900 text-white shadow-2xs'
-                    : 'bg-gray-50 text-gray-600 border border-gray-200/60 hover:bg-gray-100'
-                }`}
-              >
-                {df.label}
-              </button>
-            ))}
-          </div>
+          {/* ✨ شريط الفلترة الموحّد — بحث فاخر + فترات سريعة + منتقي تاريخ احترافي */}
+          <DashboardFilterBar
+            searchValue={searchQuery}
+            onSearchChange={setSearchQuery}
+            searchPlaceholder="ابحث في المصروفات — مثال: بن، صيانة، كهرباء"
+            periods={[
+              { id: 'all', label: 'الكل' },
+              { id: 'today', label: 'اليوم' },
+              { id: 'week', label: 'آخر ٧ أيام' },
+              { id: 'month', label: 'هذا الشهر' },
+            ]}
+            activePeriod={hasCustomRange ? '' : dateFilter}
+            onPeriodChange={(id) => {
+              setDateFilter(id as typeof dateFilter);
+              setDateFrom('');
+              setDateTo('');
+            }}
+            resultCount={filteredExpenses.length}
+            resultLabel="عملية مسجلة"
+            activeCount={
+              (categoryFilter !== 'all' && viewMode === 'operational' ? 1 : 0) +
+              (searchQuery ? 1 : 0) +
+              (dateFilter !== 'all' ? 1 : 0) +
+              (dateFrom ? 1 : 0) +
+              (dateTo ? 1 : 0)
+            }
+            onReset={handleFilterReset}
+          >
+            <DateRangeFilter
+              value={{
+                from: dateFrom ? new Date(`${dateFrom}T00:00:00`) : null,
+                to: dateTo ? new Date(`${dateTo}T00:00:00`) : null,
+                preset: 'custom',
+              }}
+              onChange={(range) => {
+                // اختيار نطاق مخصص يلغي الفترة السريعة لتفادي التعارض
+                setDateFilter('all');
+                setDateFrom(range.from ? toLocalDateString(range.from) : '');
+                setDateTo(range.to ? toLocalDateString(range.to) : '');
+              }}
+              maxDate={new Date()}
+              showPresets
+              className="w-full sm:w-[260px]"
+            />
+          </DashboardFilterBar>
 
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-gray-100">
             {/* Category Filter */}
@@ -583,10 +621,6 @@ export const AdminExpensesPage: React.FC = () => {
                 أخرى
               </button>
             </div>
-
-            <span className="text-xs text-gray-800 bg-gray-100/80 border border-gray-200 px-2.5 py-1 rounded-xl font-bold font-mono">
-              {filteredExpenses.length} عملية مسجلة
-            </span>
           </div>
 
           {isLoading ? (
@@ -611,35 +645,18 @@ export const AdminExpensesPage: React.FC = () => {
                     id={exp._id}
                     status={exp.amount > 10000 ? 'processing' : 'completed'}
                     title={exp.description}
-                    subtitle={`#${exp._id.slice(-6)} • ${formatDate(exp.date)}`}
+                    subtitle={formatDate(exp.date || exp.createdAt)}
                     onClick={() => setViewingExpense(exp)}
                     amounts={{
-                      primary: formatNumber(exp.amount),
-                      currency: 'ج.م',
+                      primary: exp.amount,
                     }}
                     metadata={[
-                      { label: 'الفئة', value: categoryLabels[exp.category] || exp.category, icon: <ReceiptText className="w-3.5 h-3.5" /> },
-                      { label: 'المسجل', value: authorName, icon: <User className="w-3.5 h-3.5" /> },
-                      { label: 'التاريخ', value: formatDate(exp.date), icon: <Calendar className="w-3.5 h-3.5" /> },
+                      { label: 'الفئة', value: categoryLabels[exp.category] || exp.category },
                     ]}
-                    dates={{
-                      created: exp.date,
-                      updated: exp.createdAt,
-                    }}
+                    
+                    
                     tags={exp.inventoryQuantityAdded ? [`+${formatNumber(exp.inventoryQuantityAdded)} وحدة للمخزن`] : []}
-                    actions={[
-                      {
-                        icon: <Eye className="w-3.5 h-3.5" />,
-                        label: 'عرض',
-                        onClick: (e) => { e.stopPropagation(); setViewingExpense(exp); },
-                        variant: 'default',
-                      },
-                      {
-                        icon: <FileText className="w-3.5 h-3.5" />,
-                        label: 'تفاصيل',
-                        onClick: (e) => { e.stopPropagation(); setViewingExpense(exp); },
-                        variant: 'default',
-                      },
+                                        actions={[
                       {
                         icon: <Edit2 className="w-3.5 h-3.5" />,
                         label: 'تعديل',
@@ -727,38 +744,90 @@ export const AdminExpensesPage: React.FC = () => {
             );
           })()}
 
-          {/* Category Breakdown */}
-          <div className="flex items-center justify-between pb-3 pt-1 border-b border-gray-100">
-            <span className="text-xs text-gray-400">تحليل نسبي</span>
-            <h3 className="font-bold text-base text-gray-900">توزيع المصروفات</h3>
-          </div>
+          {/* Category Breakdown / Purchases Breakdown */}
+          {viewMode === 'purchases' ? (
+            <>
+              <div className="flex items-center justify-between pb-3 pt-1 border-b border-gray-100">
+                <span className="text-xs text-gray-400">بتشتري إيه بالظبط؟</span>
+                <h3 className="font-bold text-base text-gray-900">توزيع المشتريات على الأصناف</h3>
+              </div>
 
-          {categoryPercentages.length === 0 ? (
-            <div className="text-center py-8 text-gray-400 text-xs">
-              لا توجد بيانات مصروفات لعرض التحليل.
-            </div>
-          ) : (
-            <div className="space-y-3 text-xs">
-              {categoryPercentages.map(({ category, amount, percentage }) => (
-                <div key={category}>
-                  <div className="flex justify-between text-gray-700 mb-1 font-medium">
-                    <span className="font-mono">{formatPrice(amount)} ({formatNumber(percentage)}%)</span>
-                    <span>{categoryLabels[category]}</span>
-                  </div>
-                  <div className="w-full bg-gray-100 h-2.5 rounded-full overflow-hidden">
-                    <div
-                      className={`${categoryColors[category]} h-full rounded-full transition-all duration-500`}
-                      style={{ width: `${percentage}%` }}
-                    />
-                  </div>
+              {shownPurchaseBreakdown.length === 0 ? (
+                <div className="text-center py-8 text-gray-400 text-xs">
+                  لا توجد مشتريات مسجلة لعرض التحليل.
                 </div>
-              ))}
-            </div>
+              ) : (
+                <div className="space-y-3 text-xs">
+                  {shownPurchaseBreakdown.slice(0, 8).map((pb, idx) => {
+                    const pct = shownTotal > 0 ? Math.round((pb.amount / shownTotal) * 100) : 0;
+                    return (
+                      <div key={idx}>
+                        <div className="flex justify-between text-gray-700 mb-1 font-medium">
+                          <span className="font-mono">{formatPrice(pb.amount)} ({formatNumber(pct)}%)</span>
+                          <span className="truncate max-w-[55%]">{pb.name}</span>
+                        </div>
+                        <div className="w-full bg-gray-100 h-2.5 rounded-full overflow-hidden">
+                          <div
+                            className="bg-gradient-to-l from-blue-400 to-[#2e5b9f] h-full rounded-full transition-all duration-500"
+                            style={{ width: `${pct}%` }}
+                          />
+                        </div>
+                        <div className="flex justify-between mt-0.5 text-[10px] text-gray-400 font-mono">
+                          <span>{formatNumber(pb.count)} عملية شراء</span>
+                          {pb.qty > 0 && <span>+{formatNumber(pb.qty)} وحدة للمخزن</span>}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              <div className="flex items-center justify-between pb-3 pt-1 border-b border-gray-100">
+                <span className="text-xs text-gray-400">تحليل نسبي</span>
+                <h3 className="font-bold text-base text-gray-900">توزيع المصروفات</h3>
+              </div>
+
+              {shownCategoryBreakdown.length === 0 ? (
+                <div className="text-center py-8 text-gray-400 text-xs">
+                  لا توجد بيانات مصروفات لعرض التحليل.
+                </div>
+              ) : (
+                <div className="space-y-3 text-xs">
+                  {shownCategoryBreakdown.map(({ category, amount, percentage }) => (
+                    <div key={category}>
+                      <div className="flex justify-between text-gray-700 mb-1 font-medium">
+                        <span className="font-mono">{formatPrice(amount)} ({formatNumber(percentage)}%)</span>
+                        <span>{categoryLabels[category]}</span>
+                      </div>
+                      <div className="w-full bg-gray-100 h-2.5 rounded-full overflow-hidden">
+                        <div
+                          className={`${categoryColors[category]} h-full rounded-full transition-all duration-500`}
+                          style={{ width: `${percentage}%` }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>
 
-      {/* Add Expense Modal */}
+            {/* Pagination (Professional Google-style) — باجناش واحد صحيح: إصلاح أسماء الدعائم (كان page/totalPages → NaN) والإزالة النص المتكرر تحت الأسهم */}
+      {!isLoading && filteredExpenses.length > 0 && (
+        <Pagination
+          currentPage={currentPage}
+          totalItems={filteredExpenses.length}
+          itemsPerPage={itemsPerPage}
+          onPageChange={handlePageChange}
+          maxPages={7}
+        />
+      )}
+
+       {/* Add Expense Modal */}
       <Modal
         isOpen={isAddModalOpen}
         onClose={() => setIsAddModalOpen(false)}
@@ -768,7 +837,7 @@ export const AdminExpensesPage: React.FC = () => {
         <form noValidate onSubmit={handleCreateExpense} className="space-y-4 text-right">
           <Input
             label="بيان المصروف *"
-            placeholder="مثال: فاتورة بن كولومبي، صيانة ماكينة، كهرباء..."
+            placeholder="مثال: فاتورة ، صيانة ماكينة، كهرباء..."
             value={formData.description}
             onChange={(e) => {
               setFormData({ ...formData, description: e.target.value });
@@ -781,7 +850,7 @@ export const AdminExpensesPage: React.FC = () => {
 
           <div className="grid grid-cols-2 gap-3">
             <Input
-              label="المبلغ (ج.م) *"
+              label="المبلغ (جنيها) *"
               type="number"
               min="1"
               placeholder="1500"
@@ -885,15 +954,6 @@ export const AdminExpensesPage: React.FC = () => {
         variant="danger"
       />
 
-      {/* Filter Dialog */}
-      <FilterDialog
-        isOpen={isFilterDialogOpen}
-        onClose={() => setIsFilterDialogOpen(false)}
-        config={filterDialogConfig}
-        onApply={handleFilterApply}
-        onReset={handleFilterReset}
-      />
-
       {/* View Detail Modal */}
       <Modal
         isOpen={!!viewingExpense}
@@ -907,9 +967,7 @@ export const AdminExpensesPage: React.FC = () => {
               <ReceiptText className="w-10 h-10 rounded-xl bg-rose-500 text-white flex items-center justify-center" />
               <div>
                 <h3 className="text-lg font-bold text-gray-900">{viewingExpense.description}</h3>
-                <p className="text-xs text-gray-500 mt-1">
-                  قيد مصروف #${viewingExpense._id.slice(-8)}
-                </p>
+               
               </div>
             </div>
 
@@ -964,22 +1022,8 @@ export const AdminExpensesPage: React.FC = () => {
                 </div>
               )}
 
-              {/* Timestamps */}
-              <div className="col-span-1 sm:col-span-2 flex flex-wrap items-center gap-2 pt-1">
-                <span className="inline-flex items-center gap-1.5 bg-blue-50 border border-blue-100 text-blue-800 text-xs font-semibold px-3 py-1.5 rounded-xl">
-                  <span className="text-base">📅</span>
-                  <span className="text-[10px] text-blue-500 font-bold">أُنشئ في</span>
-                  <span className="font-mono font-bold">{formatDate(viewingExpense.createdAt)}</span>
-                </span>
-                {viewingExpense.updatedAt && viewingExpense.updatedAt !== viewingExpense.createdAt && (
-                  <span className="inline-flex items-center gap-1.5 bg-amber-50 border border-amber-200 text-amber-800 text-xs font-semibold px-3 py-1.5 rounded-xl">
-                    <span className="text-base">✏️</span>
-                    <span className="text-[10px] text-amber-600 font-bold">آخر تعديل</span>
-                    <span className="font-mono font-bold">{formatDate(viewingExpense.updatedAt)}</span>
-                  </span>
-                )}
-              </div>
-            </div>
+                            {/* 📅 التاريخ موحّد في حقل "تاريخ الفاتورة / القيد" أعلاه لتفادي التكرار البصري */}
+                                      </div>
 
             <div className="pt-4 flex justify-end gap-2 border-t border-gray-100">
               <Button type="button" variant="outline" onClick={() => setViewingExpense(null)}>
@@ -1030,7 +1074,7 @@ export const AdminExpensesPage: React.FC = () => {
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Input
-              label="المبلغ (ج.م) *"
+              label="المبلغ (جنيها) *"
               type="number"
               min="0.01"
               step="0.01"
@@ -1103,30 +1147,30 @@ export const AdminExpensesPage: React.FC = () => {
             </div>
           )}
 
-          <div className="pt-4 flex items-center justify-end gap-2 border-t border-gray-100">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => {
-                setIsEditModalOpen(false);
-                setIsEditFormSubmitted(false);
-                setEditFormErrors({});
-                setEditingExpense(null);
-              }}
-            >
-              إلغاء
-            </Button>
-            <Button
-              type="submit"
-              variant="primary"
-              isLoading={isSubmitting}
-              className="bg-[#2e5b9f]"
-            >
-              حفظ التعديلات
-            </Button>
-          </div>
-        </form>
-      </Modal>
-    </div>
-  );
-};
+            <div className="pt-4 flex items-center justify-end gap-2 border-t border-gray-100">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setIsEditModalOpen(false);
+                  setIsEditFormSubmitted(false);
+                  setEditFormErrors({});
+                  setEditingExpense(null);
+                }}
+              >
+                إلغاء
+              </Button>
+              <Button
+                type="submit"
+                variant="primary"
+                isLoading={isSubmitting}
+                className="bg-[#2e5b9f]"
+              >
+                حفظ التعديلات
+              </Button>
+            </div>
+          </form>
+        </Modal>
+      </div>
+    );
+  };

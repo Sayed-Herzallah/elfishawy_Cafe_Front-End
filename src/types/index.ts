@@ -111,6 +111,12 @@ export interface Expense {
   category: ExpenseCategory;
   inventoryItemLinked?: string | InventoryItem;
   inventoryQuantityAdded?: number;
+  /** سعر وحدة الشراء اللي دخلها الكاشير (لو الـ API بيرجعها) */
+  unitCost?: number;
+  /** اسم المورد (لو الـ API بيرجعه منفصل) */
+  supplierName?: string;
+  /** رقم الفاتورة الورقية (لو الـ API بيرجعه منفصل) */
+  invoiceNumber?: string;
   date: string;
   addedBy: string | { _id: string; userName: string; email: string };
   createdAt?: string;

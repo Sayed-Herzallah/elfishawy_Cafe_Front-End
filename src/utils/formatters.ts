@@ -5,17 +5,17 @@
 
 /**
  * Formats a numeric price into a localized string with English numbers and the currency.
- * Example: 35500 -> "35,500 ج.م"
+ * Example: 35500 -> "35,500 "
  */
 export const formatPrice = (price: number | undefined | null): string => {
   if (price === undefined || price === null || isNaN(Number(price))) {
-    return '0 ج.م';
+    return '0 جنيها';
   }
   const formatted = Number(price).toLocaleString('en-US', {
     minimumFractionDigits: 0,
     maximumFractionDigits: 2,
   });
-  return `${formatted} ج.م`;
+  return `${formatted} جنيها`;
 };
 
 /**

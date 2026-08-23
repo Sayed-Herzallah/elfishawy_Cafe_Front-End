@@ -187,7 +187,7 @@ export const PublicMenuPage: React.FC = () => {
  
                    <div className="pt-3 mt-3 border-t border-gray-50 flex items-baseline justify-between">
                      <span className="text-[11px] text-gray-400">السعر</span>
-                     <span className="font-bold text-sm text-[#2e5b9f] font-mono">{prod.price} ج.م</span>
+                     <span className="font-bold text-sm text-[#2e5b9f] font-mono">{prod.price} جنيها</span>
                    </div>
                  </div>
                </div>

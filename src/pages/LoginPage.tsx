@@ -27,12 +27,12 @@ export const LoginPage: React.FC = () => {
     }
 
     setIsLoading(true);
-    const success = await login(email, password);
+    const loggedInUser = await login(email, password);
     setIsLoading(false);
 
-    if (success) {
-      // Determine redirection based on role or default
-      if (email.toLowerCase().includes('cashier')) {
+    if (loggedInUser) {
+      // ✅ التحويل حسب الدور الفعلي من الـ Backend — وليس محتوى الإيميل
+      if (loggedInUser.roleType === 'cashier') {
         navigate('/pos');
       } else {
         navigate('/admin');

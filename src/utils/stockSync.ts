@@ -2,7 +2,7 @@ import { productService, recipeService } from '../services/catalogService';
 import { inventoryService } from '../services/opsService';
 
 // Helper to convert units to base unit
-const toBase = (qty: number, unit: string): number => {
+export const toBase = (qty: number, unit: string): number => {
   const u = (unit || '').toUpperCase();
   if (u === 'KG') return qty * 1000;
   if (u === 'LITER') return qty * 1000;

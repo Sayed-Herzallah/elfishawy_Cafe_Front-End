@@ -6,6 +6,9 @@ import { InventoryItem } from '../../types';
 import { useNotification } from '../../contexts/NotificationContext';
 import { formatPrice, formatNumber, formatDate } from '../../utils/formatters';
 import { StatCard } from '../../components/ui/StatCard';
+import { ComparisonStatCard } from '../../components/ui/ComparisonStatCard';
+import { DateRangeFilter, DateRange, toLocalDateString } from '../../components/ui/DateRangeFilter';
+import { DashboardFilterBar } from '../../components/ui/DashboardFilterBar';
 import { Badge } from '../../components/ui/Badge';
 import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
@@ -13,7 +16,6 @@ import { Input } from '../../components/ui/Input';
 import { Select } from '../../components/ui/Select';
 import { LoadingSkeleton } from '../../components/ui/LoadingSkeleton';
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
-import { FilterDialog } from '../../components/ui/FilterDialog';
 import {
   Boxes,
   AlertTriangle,
@@ -27,6 +29,10 @@ import {
   Filter,
   Eye,
   Edit2,
+  X,
+  MoreVertical,
+  TrendingUp,
+  TrendingDown,
 } from 'lucide-react';
 
 export const AdminInventoryPage: React.FC = () => {
@@ -46,9 +52,6 @@ export const AdminInventoryPage: React.FC = () => {
   const [restockErrors, setRestockErrors] = useState<{ quantity?: string }>({});
   const [isFormSubmitted, setIsFormSubmitted] = useState(false);
   const [isRestockSubmitted, setIsRestockSubmitted] = useState(false);
-  
-  // Filter Dialog
-  const [isFilterDialogOpen, setIsFilterDialogOpen] = useState(false);
 
   const [formData, setFormData] = useState({
     name: '',
@@ -91,58 +94,11 @@ export const AdminInventoryPage: React.FC = () => {
     loadInventory();
   }, []);
 
-  // Filter Dialog Config
-  const filterDialogConfig = {
-    title: 'تصفية المخزون',
-    fields: [
-      {
-        name: 'search',
-        label: 'بحث',
-        type: 'input' as const,
-        placeholder: 'اسم المادة...',
-        defaultValue: searchQuery,
-      },
-      {
-        name: 'filterMode',
-        label: 'حالة المخزون',
-        type: 'select' as const,
-        options: [
-          { value: 'all', label: 'الكل' },
-          { value: 'low', label: 'منخفض' },
-          { value: 'out', label: 'نافد' },
-        ],
-        defaultValue: filterMode,
-      },
-      {
-        name: 'dateFrom',
-        label: 'من تاريخ التوريد',
-        type: 'date' as const,
-        defaultValue: dateFrom,
-      },
-      {
-        name: 'dateTo',
-        label: 'إلى تاريخ التوريد',
-        type: 'date' as const,
-        defaultValue: dateTo,
-      },
-    ],
-    activeFiltersCount: (searchQuery ? 1 : 0) + (filterMode !== 'all' ? 1 : 0) + (dateFrom ? 1 : 0) + (dateTo ? 1 : 0),
-  };
-
-  const handleFilterApply = (values: any) => {
-    if (values.search !== undefined) setSearchQuery(values.search);
-    if (values.filterMode !== undefined) setFilterMode(values.filterMode);
-    if (values.dateFrom !== undefined) setDateFrom(values.dateFrom);
-    if (values.dateTo !== undefined) setDateTo(values.dateTo);
-    setIsFilterDialogOpen(false);
-  };
-
   const handleFilterReset = () => {
     setSearchQuery('');
     setFilterMode('all');
     setDateFrom('');
     setDateTo('');
-    setIsFilterDialogOpen(false);
   };
 
   const handleCreateItem = async (e: React.FormEvent) => {
@@ -299,20 +255,32 @@ export const AdminInventoryPage: React.FC = () => {
 
   const lowStockCount = items.filter((i) => i.quantity > 0 && i.quantity <= i.minLimit).length;
   const outOfStockCount = items.filter((i) => i.quantity <= 0).length;
-  const totalValue = items.reduce((sum, i) => sum + (i.costPrice || 0) * i.quantity, 0);
-
-  // Real percentage indicators (share of total items)
-  const availableCount = Math.max(0, items.length - lowStockCount - outOfStockCount);
-  const availablePct = items.length > 0 ? Math.round((availableCount / items.length) * 100) : 0;
-  const lowPct = items.length > 0 ? Math.round((lowStockCount / items.length) * 100) : 0;
-  const outPct = items.length > 0 ? Math.round((outOfStockCount / items.length) * 100) : 0;
 
   const filteredItems = items.filter((item) => {
     const matchesSearch = item.name.toLowerCase().includes(searchQuery.trim().toLowerCase());
-    if (filterMode === 'low') return matchesSearch && item.quantity > 0 && item.quantity <= item.minLimit;
-    if (filterMode === 'out') return matchesSearch && item.quantity <= 0;
-    return matchesSearch;
+    if (!matchesSearch) return false;
+
+    // ✅ نطاق التاريخ المخصص — على آخر توريد / تحديث للصنف
+    if (dateFrom || dateTo) {
+      const itemDate = new Date(item.lastRestocked || item.updatedAt || item.createdAt || '');
+      if (!itemDate || isNaN(itemDate.getTime())) return false;
+      if (dateFrom && itemDate < new Date(`${dateFrom}T00:00:00`)) return false;
+      if (dateTo && itemDate > new Date(`${dateTo}T23:59:59.999`)) return false;
+    }
+
+    if (filterMode === 'low') return item.quantity > 0 && item.quantity <= item.minLimit;
+    if (filterMode === 'out') return item.quantity <= 0;
+    return true;
   });
+
+  // 📊 كل الإحصائيات بتتحسب من النتائج المعروضة بعد الفلترة — مش من كل الأصناف
+  const shownLowCount = filteredItems.filter((i) => i.quantity > 0 && i.quantity <= i.minLimit).length;
+  const shownOutCount = filteredItems.filter((i) => i.quantity <= 0).length;
+  const shownValue = filteredItems.reduce((sum, i) => sum + (i.costPrice || 0) * i.quantity, 0);
+  const shownAvailableCount = Math.max(0, filteredItems.length - shownLowCount - shownOutCount);
+  const availablePct = filteredItems.length > 0 ? Math.round((shownAvailableCount / filteredItems.length) * 100) : 0;
+  const lowPct = filteredItems.length > 0 ? Math.round((shownLowCount / filteredItems.length) * 100) : 0;
+  const outPct = filteredItems.length > 0 ? Math.round((shownOutCount / filteredItems.length) * 100) : 0;
 
   return (
     <div className="space-y-6 text-right font-sans">
@@ -345,15 +313,15 @@ export const AdminInventoryPage: React.FC = () => {
       {/* Stats Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
-          title="إجمالي الأصناف"
-          value={`${formatNumber(items.length)} صنف`}
+          title="إجمالي الأصناف المعروضة"
+          value={`${formatNumber(filteredItems.length)} صنف`}
           percentage={availablePct}
           icon={<Boxes className="w-5 h-5 text-gray-500" />}
           variant="neutral"
         />
         <StatCard
           title="مخزون منخفض"
-          value={`${formatNumber(lowStockCount)} صنف`}
+          value={`${formatNumber(shownLowCount)} صنف`}
           subtitle="أقل من حد الأمان"
           percentage={lowPct}
           isPositive={false}
@@ -362,7 +330,7 @@ export const AdminInventoryPage: React.FC = () => {
         />
         <StatCard
           title="نفد من المخزون"
-          value={`${formatNumber(outOfStockCount)} صنف`}
+          value={`${formatNumber(shownOutCount)} صنف`}
           subtitle="يحتاج لتوريد عاجل"
           percentage={outPct}
           isPositive={false}
@@ -370,85 +338,51 @@ export const AdminInventoryPage: React.FC = () => {
           variant="pink"
         />
         <StatCard
-          title="قيمة المخزون التقديرية"
-          value={formatPrice(totalValue)}
+          title="قيمة المخزون المعروض"
+          value={formatPrice(shownValue)}
           icon={<CheckCircle2 className="w-5 h-5 text-[#2e5b9f]" />}
           variant="blue"
         />
       </div>
 
-      {/* Filter & Search Bar */}
-      <div className="bg-white rounded-2xl border border-gray-200/80 p-4 shadow-2xs space-y-3">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-          {/* Search Box */}
-          <div className="relative flex-1">
-            <Search className="w-4 h-4 text-gray-400 absolute right-3.5 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              placeholder="ابحث في الأصناف والمواد — مثال: بن، سكر، أكواب"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full bg-[#faf8f5] hover:bg-white focus:bg-white border border-gray-200 rounded-xl pr-10 pl-3 py-2.5 text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-[#2e5b9f]/20 focus:border-[#2e5b9f]"
-            />
-          </div>
-
-          {/* Action Buttons */}
-          <div className="flex items-center gap-1.5 shrink-0">
-            <button
-              onClick={() => setIsFilterDialogOpen(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-2 border border-gray-200/60 rounded-xl text-xs font-bold text-gray-700 hover:bg-[#faf8f5] transition cursor-pointer"
-            >
-              <Filter className="w-3.5 h-3.5 text-[#2e5b9f]" />
-              تصفية متقدمة
-            </button>
-            {(filterMode !== 'all' || searchQuery) && (
-              <button
-                onClick={handleFilterReset}
-                className="flex items-center justify-center gap-1 py-2 px-3 border border-gray-200/60 rounded-xl text-xs font-bold text-rose-600 hover:bg-[#fff5f5] transition cursor-pointer"
-              >
-                مسح الفلاتر
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* Status Filter Pills */}
-        <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-gray-100">
-          <span className="text-[11px] font-bold text-gray-500 ml-1 flex items-center gap-1">
-            <Filter className="w-3.5 h-3.5 text-[#2e5b9f]" /> الحالة:
-          </span>
-          <button
-            onClick={() => setFilterMode('all')}
-            className={`py-1 px-3 rounded-xl text-xs font-bold transition whitespace-nowrap cursor-pointer ${
-              filterMode === 'all'
-                ? 'bg-gray-900 text-white shadow-2xs'
-                : 'bg-gray-50 text-gray-600 border border-gray-200/60 hover:bg-gray-100'
-            }`}
-          >
-            الكل ({items.length})
-          </button>
-          <button
-            onClick={() => setFilterMode('low')}
-            className={`py-1 px-3 rounded-xl text-xs font-bold transition whitespace-nowrap cursor-pointer ${
-              filterMode === 'low'
-                ? 'bg-amber-600 text-white shadow-2xs'
-                : 'bg-gray-50 text-gray-600 border border-gray-200/60 hover:bg-gray-100'
-            }`}
-          >
-            منخفض ({lowStockCount})
-          </button>
-          <button
-            onClick={() => setFilterMode('out')}
-            className={`py-1 px-3 rounded-xl text-xs font-bold transition whitespace-nowrap cursor-pointer ${
-              filterMode === 'out'
-                ? 'bg-rose-600 text-white shadow-2xs'
-                : 'bg-gray-50 text-gray-600 border border-gray-200/60 hover:bg-gray-100'
-            }`}
-          >
-            نافد ({outOfStockCount})
-          </button>
-        </div>
-      </div>
+      {/* ✨ شريط الفلترة الموحّد — بحث + حالة + منتقي تاريخ احترافي */}
+      <DashboardFilterBar
+        searchValue={searchQuery}
+        onSearchChange={setSearchQuery}
+        searchPlaceholder="ابحث في الأصناف والمواد — مثال: بن، سكر، أكواب"
+        groupLabel="الحالة:"
+        periods={[
+          { id: 'all', label: `الكل (${formatNumber(items.length)})` },
+          { id: 'low', label: `منخفض (${formatNumber(lowStockCount)})` },
+          { id: 'out', label: `نافد (${formatNumber(outOfStockCount)})` },
+        ]}
+        activePeriod={filterMode}
+        onPeriodChange={(id) => setFilterMode(id as typeof filterMode)}
+        resultCount={filteredItems.length}
+        resultLabel="صنف معروض"
+        activeCount={
+          (searchQuery ? 1 : 0) +
+          (filterMode !== 'all' ? 1 : 0) +
+          (dateFrom ? 1 : 0) +
+          (dateTo ? 1 : 0)
+        }
+        onReset={handleFilterReset}
+      >
+        <DateRangeFilter
+          value={{
+            from: dateFrom ? new Date(`${dateFrom}T00:00:00`) : null,
+            to: dateTo ? new Date(`${dateTo}T00:00:00`) : null,
+            preset: 'custom',
+          }}
+          onChange={(range) => {
+            setDateFrom(range.from ? toLocalDateString(range.from) : '');
+            setDateTo(range.to ? toLocalDateString(range.to) : '');
+          }}
+          maxDate={new Date()}
+          showPresets
+          className="w-full sm:w-[260px]"
+        />
+      </DashboardFilterBar>
 
       {/* Main 2-Column Layout - RTL: Content on right (order-1), Sidebar on left (order-2) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
@@ -485,11 +419,12 @@ export const AdminInventoryPage: React.FC = () => {
                       ? item.lastRestockedBy
                       : null;
 
-                  return (
-                    <div
-                      key={item._id}
-                      className="bg-[#faf8f5]/50 border border-gray-200/60 rounded-2xl p-4 space-y-3 text-right"
-                    >
+return (
+                     <div
+                       key={item._id}
+                       className="bg-[#faf8f5]/50 border border-gray-200/60 rounded-2xl p-4 space-y-3 text-right"
+                       onClick={() => setViewingItem(item)}
+                     >
                       <div className="flex items-start justify-between gap-2">
                         <div>
                           <span className="font-bold text-gray-900 text-sm block">{item.name}</span>
@@ -516,6 +451,12 @@ export const AdminInventoryPage: React.FC = () => {
                           </span>
                         </div>
                         <div className="text-left">
+                          <span className="text-[10px] text-gray-400 block mb-0.5">سعر التكلفة</span>
+                          <span className="font-bold text-[#2e5b9f] font-mono">
+                            {item.costPrice ? `${formatPrice(item.costPrice)} / ${item.unit}` : '—'}
+                          </span>
+                        </div>
+                        <div className="sm:col-span-2">
                           <span className="text-[10px] text-gray-400 block mb-0.5">حد الأمان</span>
                           <span className="font-bold text-gray-500 font-mono">
                             {formatNumber(item.minLimit)} {item.unit}
@@ -524,34 +465,39 @@ export const AdminInventoryPage: React.FC = () => {
                       </div>
 
                       <div className="flex items-center justify-end gap-2 pt-2 border-t border-gray-100/50">
-                        <button
-                          onClick={() => setViewingItem(item)}
-                          className="inline-flex items-center gap-1 py-1 px-2.5 rounded-lg bg-gray-50 text-gray-600 hover:bg-gray-100 font-bold transition text-[11px]"
-                          title="عرض التفاصيل"
-                        >
+<button
+                           onClick={(e) => {
+                             e.stopPropagation();
+                             setViewingItem(item);
+                           }}
+                           className="inline-flex items-center gap-1 py-1 px-2.5 rounded-lg bg-gray-50 text-gray-600 hover:bg-gray-100 font-bold transition text-[11px]"
+                           title="عرض التفاصيل"
+                         >
                           <Eye className="w-3.5 h-3.5" />
                           <span>تفاصيل</span>
                         </button>
-                        <button
-                          onClick={() => {
-                            setEditingItem(item);
-                            setEditFormData({
-                              name: item.name,
-                              unit: item.unit,
-                              minLimit: String(item.minLimit),
-                            });
-                            setEditFormErrors({});
-                            setIsEditFormSubmitted(false);
-                            setIsEditModalOpen(true);
-                          }}
-                          className="inline-flex items-center gap-1 py-1 px-2.5 rounded-lg bg-amber-50 text-amber-700 hover:bg-amber-100 font-bold transition text-[11px]"
-                          title="تعديل الصنف"
-                        >
+<button
+                           onClick={(e) => {
+                             e.stopPropagation();
+                             setEditingItem(item);
+                             setEditFormData({
+                               name: item.name,
+                               unit: item.unit,
+                               minLimit: String(item.minLimit),
+                             });
+                             setEditFormErrors({});
+                             setIsEditFormSubmitted(false);
+                             setIsEditModalOpen(true);
+                           }}
+                           className="inline-flex items-center gap-1 py-1 px-2.5 rounded-lg bg-amber-50 text-amber-700 hover:bg-amber-100 font-bold transition text-[11px]"
+                           title="تعديل الصنف"
+                         >
                           <Edit2 className="w-3.5 h-3.5" />
                           <span>تعديل</span>
                         </button>
                         <button
-                          onClick={() => {
+                          onClick={(e) => {
+                            e.stopPropagation();
                             setSelectedItem(item);
                             setRestockQty('10');
                             setRestockErrors({});
@@ -563,7 +509,7 @@ export const AdminInventoryPage: React.FC = () => {
                           <span>توريد</span>
                         </button>
                         <button
-                          onClick={() => handleDeleteItem(item._id, item.name)}
+                          onClick={(e) => { e.stopPropagation(); handleDeleteItem(item._id, item.name); }}
                           className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition"
                           title="حذف الصنف"
                         >
@@ -577,11 +523,12 @@ export const AdminInventoryPage: React.FC = () => {
 
               {/* Desktop Table Layout (>= md) */}
               <div className="hidden md:block overflow-x-auto -mx-6 px-6 pb-2">
-                <table className="w-full text-right border-collapse text-xs min-w-[650px]">
+                <table className="w-full text-right border-collapse text-xs min-w-[780px]">
                   <thead>
                     <tr className="border-b border-gray-100 text-gray-400 font-semibold">
                       <th className="pb-3 px-3">اسم المادة / الصنف</th>
                       <th className="pb-3 px-3">الكمية الحالية</th>
+                      <th className="pb-3 px-3">سعر التكلفة</th>
                       <th className="pb-3 px-3">حد الأمان</th>
                       <th className="pb-3 px-3">آخر توريد</th>
                       <th className="pb-3 px-3">الحالة</th>
@@ -600,7 +547,11 @@ export const AdminInventoryPage: React.FC = () => {
                           : null;
 
                       return (
-                        <tr key={item._id} className="hover:bg-[#faf8f5]/60 transition">
+                        <tr
+                          key={item._id}
+                          className="hover:bg-[#faf8f5]/60 transition cursor-pointer"
+                          onClick={() => setViewingItem(item)}
+                        >
                           <td className="py-3.5 px-3">
                             <span className="font-bold text-gray-900 block">{item.name}</span>
                             {item.lastRestocked && (
@@ -613,6 +564,10 @@ export const AdminInventoryPage: React.FC = () => {
 
                           <td className="py-3.5 px-3 font-mono font-bold text-sm text-gray-900">
                             {formatNumber(item.quantity)} {item.unit}
+                          </td>
+
+                          <td className="py-3.5 px-3 font-mono text-[#2e5b9f] font-bold">
+                            {item.costPrice ? `${formatPrice(item.costPrice)} / ${item.unit}` : '—'}
                           </td>
 
                           <td className="py-3.5 px-3 font-mono text-gray-500">
@@ -635,7 +590,7 @@ export const AdminInventoryPage: React.FC = () => {
                           <td className="py-3.5 px-3 text-left">
                             <div className="flex items-center justify-end gap-2">
                               <button
-                                onClick={() => setViewingItem(item)}
+                                onClick={(e) => { e.stopPropagation(); setViewingItem(item); }}
                                 className="inline-flex items-center gap-1 py-1 px-2.5 rounded-lg bg-gray-50 text-gray-600 hover:bg-gray-100 font-bold transition text-[11px]"
                                 title="عرض التفاصيل"
                               >
@@ -643,7 +598,8 @@ export const AdminInventoryPage: React.FC = () => {
                                 <span>تفاصيل</span>
                               </button>
                               <button
-                                onClick={() => {
+                                onClick={(e) => {
+                                  e.stopPropagation();
                                   setEditingItem(item);
                                   setEditFormData({
                                     name: item.name,
@@ -661,7 +617,8 @@ export const AdminInventoryPage: React.FC = () => {
                                 <span>تعديل</span>
                               </button>
                               <button
-                                onClick={() => {
+                                onClick={(e) => {
+                                  e.stopPropagation();
                                   setSelectedItem(item);
                                   setRestockQty('10');
                                   setRestockErrors({});
@@ -673,7 +630,7 @@ export const AdminInventoryPage: React.FC = () => {
                                 <span>توريد</span>
                               </button>
                               <button
-                                onClick={() => handleDeleteItem(item._id, item.name)}
+                                onClick={(e) => { e.stopPropagation(); handleDeleteItem(item._id, item.name); }}
                                 className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition"
                                 title="حذف الصنف"
                               >
@@ -891,15 +848,6 @@ export const AdminInventoryPage: React.FC = () => {
         confirmText="حذف"
         cancelText="إلغاء"
         variant="danger"
-      />
-
-      {/* Filter Dialog */}
-      <FilterDialog
-        isOpen={isFilterDialogOpen}
-        onClose={() => setIsFilterDialogOpen(false)}
-        config={filterDialogConfig}
-        onApply={handleFilterApply}
-        onReset={handleFilterReset}
       />
 
       {/* View Item Detail Modal */}

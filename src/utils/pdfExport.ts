@@ -1,5 +1,7 @@
 import jsPDF from 'jspdf';
-import html2canvas from 'html2canvas';
+// ⚠️ ملاحظة مهمة: html2canvas القديمة (1.4.1) بتفشل مع ألوان Tailwind CSS v4 (oklch)
+// وده كان سبب إن تصدير الـ PDF مش شغال خالص. html2canvas-pro بيدعم oklch/lab بالكامل.
+import html2canvas from 'html2canvas-pro';
 
 /**
  * تصدير أي عنصر HTML إلى ملف PDF احترافي (A4 متعدد الصفحات).
@@ -12,13 +14,27 @@ export const exportElementToPdf = async (
   element: HTMLElement,
   fileName: string
 ): Promise<void> => {
-  // لقطة عالية الدقة للعنصر (2x عشان جودة الطباعة)
-  const canvas = await html2canvas(element, {
-    scale: 2,
-    useCORS: true,
-    backgroundColor: '#ffffff',
-    logging: false,
-  });
+  let canvas: HTMLCanvasElement;
+  try {
+    // لقطة عالية الدقة للعنصر (2x عشان جودة الطباعة)
+    canvas = await html2canvas(element, {
+      scale: 2,
+      useCORS: true,
+      allowTaint: true,
+      backgroundColor: '#ffffff',
+      logging: false,
+      // نمرر أبعاد النافذة الحقيقية عشان الـ layout يتحسب صح
+      windowWidth: element.scrollWidth || undefined,
+      windowHeight: element.scrollHeight || undefined,
+    });
+  } catch (err) {
+    console.error('html2canvas capture failed:', err);
+    throw new Error('فشل تحويل التقرير لصورة. جرّب تاني أو استخدم تصدير CSV.');
+  }
+
+  if (!canvas || canvas.width === 0 || canvas.height === 0) {
+    throw new Error('التقرير فاضي أو لم يتم التقاطه بشكل صحيح.');
+  }
 
   const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const pageWidth = pdf.internal.pageSize.getWidth(); // 210mm

@@ -1,0 +1,39 @@
+{
+  "name": "الفيشاوي كافيه - نظام إدارة المقهى",
+  "short_name": "الفيشاوي",
+  "description": "نظام إدارة مقهى الفيشاوي المتكامل: نقاط بيع، مخزون، مبيعات، تقارير، مصروفات",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#fcfaf7",
+  "theme_color": "#2e5b9f",
+  "orientation": "portrait-primary",
+  "scope": "/",
+  "lang": "ar",
+  "dir": "rtl",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["business", "productivity", "finance"],
+  "screenshots": [],
+  "shortcuts": [
+    {
+      "name": "نقطة البيع (POS)",
+      "short_name": "POS",
+      "description": "فتح شاشة نقطة البيع",
+      "url": "/pos",
+      "icons": [{ "src": "/favicon.svg", "sizes": "96x96" }]
+    },
+    {
+      "name": "لوحة التحكم",
+      "short_name": "Dashboard",
+      "description": "عرض لوحة التحكم والإحصائيات",
+      "url": "/admin",
+      "icons": [{ "src": "/favicon.svg", "sizes": "96x96" }]
+    }
+  ]
+}

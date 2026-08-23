@@ -3,12 +3,21 @@ import { analyticsService, orderService, expenseService, inventoryService } from
 import { recipeService } from '../../services/catalogService';
 import { KPIStats, ChartsData, Order, Expense, InventoryItem, ExpenseCategory } from '../../types';
 import { AttaStatCard } from '../../components/ui/AttaStatCard';
+import { ComparisonStatCard } from '../../components/ui/ComparisonStatCard';
+import { DateRangeFilter, DateRange } from '../../components/ui/DateRangeFilter';
+import { FilterConfig } from '../../components/ui/FilterDialog';
 import { LoadingSpinner } from '../../components/ui/LoadingSpinner';
 import { ExportModal } from '../../components/ui/ExportModal';
 import { exportElementToPdf } from '../../utils/pdfExport';
 import { useNotification } from '../../contexts/NotificationContext';
-import { BarChart3, TrendingUp, TrendingDown, DollarSign, Download, Award, AlertCircle, Calendar, PieChart, Medal, Info } from 'lucide-react';
+import { BarChart3, TrendingUp, TrendingDown, DollarSign, Download, Award, AlertCircle, Calendar, PieChart, Medal, Info, X, ReceiptText } from 'lucide-react';
 import { formatPrice, formatNumber, formatDate } from '../../utils/formatters';
+import {
+  useSalesComparison,
+  useExpensesComparison,
+  useProfitComparison,
+  type TimeRange
+} from '../../hooks/useStatisticsComparison';
 
 /** Estimated per-product financials computed on the client */
 interface ProductStat {
@@ -36,12 +45,27 @@ export const AdminReportsPage: React.FC = () => {
   const [orders, setOrders] = useState<Order[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
-  const [dateFilter, setDateFilter] = useState<'all' | 'today' | 'week' | 'month'>('all');
+  const [dateRange, setDateRange] = useState<DateRange>({ from: null, to: null, preset: 'custom' });
+  const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [isExportModalOpen, setIsExportModalOpen] = useState<boolean>(false);
   const [isExportingPdf, setIsExportingPdf] = useState<boolean>(false);
   /** productId → estimated cost per unit, derived from active recipes + inventory cost prices */
   const [unitCostMap, setUnitCostMap] = useState<Map<string, number>>(new Map());
   const contentRef = useRef<HTMLDivElement>(null);
+
+  // Comparison hooks — تحويل النطاق المختار إلى فترة قابلة للمقارنة
+  const comparisonTimeRange: TimeRange =
+    dateRange.preset === 'today' || dateRange.preset === 'yesterday'
+      ? 'today'
+      : dateRange.preset === 'week'
+        ? 'week'
+        : dateRange.preset === 'year'
+          ? 'year'
+          : 'month';
+
+  const salesComparison = useSalesComparison(comparisonTimeRange, orders);
+  const expensesComparison = useExpensesComparison(comparisonTimeRange, expenses);
+  const profitComparison = useProfitComparison(comparisonTimeRange, orders, expenses);
 
   useEffect(() => {
     const loadReports = async () => {
@@ -93,49 +117,97 @@ export const AdminReportsPage: React.FC = () => {
     return <LoadingSpinner text="جاري تجهيز التقارير المالية..." />;
   }
 
-  // Filter orders by date
+  // Filter orders by date — using new DateRangeFilter
   const filteredOrders = orders.filter((o) => {
-    let matchesDate = true;
-    if (dateFilter !== 'all') {
-      const orderDate = new Date(o.createdAt);
-      const now = new Date();
-      if (dateFilter === 'today') {
-        matchesDate = orderDate.toDateString() === now.toDateString();
-      } else if (dateFilter === 'week') {
-        const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-        matchesDate = orderDate >= weekAgo;
-      } else if (dateFilter === 'month') {
-        matchesDate =
-          orderDate.getMonth() === now.getMonth() && orderDate.getFullYear() === now.getFullYear();
-      }
+    if (!o || typeof o !== 'object') return false;
+    const orderDate = new Date(o.createdAt);
+    
+    if (dateRange.from) {
+      const from = new Date(dateRange.from);
+      from.setHours(0, 0, 0, 0);
+      if (orderDate < from) return false;
     }
-    return matchesDate;
+    if (dateRange.to) {
+      const to = new Date(dateRange.to);
+      to.setHours(23, 59, 59, 999);
+      if (orderDate > to) return false;
+    }
+    return true;
   });
 
-  // Filter expenses by date
+  // Filter expenses by date + category
   const filteredExpenses = expenses.filter((e) => {
-    let matchesDate = true;
-    if (dateFilter !== 'all') {
-      const expDate = new Date(e.date || e.createdAt || '');
-      const now = new Date();
-      if (dateFilter === 'today') {
-        matchesDate = expDate.toDateString() === now.toDateString();
-      } else if (dateFilter === 'week') {
-        const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-        matchesDate = expDate >= weekAgo;
-      } else if (dateFilter === 'month') {
-        matchesDate =
-          expDate.getMonth() === now.getMonth() && expDate.getFullYear() === now.getFullYear();
-      }
+    if (!e || typeof e !== 'object') return false;
+    const expDate = new Date(e.date || e.createdAt || '');
+    
+    if (dateRange.from) {
+      const from = new Date(dateRange.from);
+      from.setHours(0, 0, 0, 0);
+      if (expDate < from) return false;
     }
-    return matchesDate;
+    if (dateRange.to) {
+      const to = new Date(dateRange.to);
+      to.setHours(23, 59, 59, 999);
+      if (expDate > to) return false;
+    }
+
+    const matchesCategory =
+      !categoryFilter || categoryFilter === 'all'
+        ? true
+        : e.category === categoryFilter;
+
+    return matchesCategory;
   });
+
+  // عدد الفلاتر النشطة (شارة على زرار الفلتر)
+  const activeFiltersCount =
+    (dateRange.from ? 1 : 0) +
+    (dateRange.to ? 1 : 0) +
+    (categoryFilter && categoryFilter !== 'all' ? 1 : 0);
+
+  const filterConfig: FilterConfig = {
+    title: 'فلترة متقدمة للتقرير المالي',
+    fields: [
+      { name: 'date', label: 'فترة مخصصة (من - إلى)', type: 'date', isDateRange: true },
+      {
+        name: 'category',
+        label: 'فئة المصروف',
+        type: 'select',
+        options: [
+          { value: 'all', label: 'كل الفئات' },
+          { value: 'inventory', label: 'مشتريات المخزون' },
+          { value: 'utilities', label: 'المرافق' },
+          { value: 'salaries', label: 'الرواتب' },
+          { value: 'rent', label: 'الإيجار' },
+          { value: 'other', label: 'أخرى' },
+        ],
+      },
+    ],
+    activeFiltersCount,
+  };
+
+  // Handle filter apply
+  const handleFilterApply = (values: Record<string, any>) => {
+    if (values.date_from !== undefined) setDateRange(prev => ({ ...prev, from: values.date_from ? new Date(values.date_from) : null }));
+    if (values.date_to !== undefined) setDateRange(prev => ({ ...prev, to: values.date_to ? new Date(values.date_to) : null }));
+    if (values.category !== undefined) setCategoryFilter(values.category);
+  };
+
+  const handleFilterReset = () => {
+    setDateRange({ from: null, to: null, preset: 'custom' });
+    setCategoryFilter('all');
+  };
 
   // Dynamic KPIs from filtered data
   const totalRevenue = filteredOrders
     .filter((o) => o.status === 'completed')
     .reduce((sum, o) => sum + o.totalAmount, 0);
   const totalExpensesFiltered = filteredExpenses.reduce((sum, e) => sum + e.amount, 0);
+  // 🛒 فصل المشتريات عن المصروفات التشغيلية في عرض التقرير
+  const purchasesFiltered = filteredExpenses
+    .filter((e) => e.category === 'inventory')
+    .reduce((s, e) => s + e.amount, 0);
+  const operatingFiltered = totalExpensesFiltered - purchasesFiltered;
   // Clamped so purchases/more expenses never surface a negative "net profit"
   const netProfit = Math.max(0, totalRevenue - totalExpensesFiltered);
   const profitMargin = totalRevenue > 0 ? Math.round((netProfit / totalRevenue) * 100) : 0;
@@ -146,11 +218,16 @@ export const AdminReportsPage: React.FC = () => {
   const expensesShare = combinedTotal > 0 ? Math.round((totalExpensesFiltered / combinedTotal) * 100) : 0;
 
   // Per-product stats from filtered orders (+ estimated profit when recipe cost data exists)
+  // ملاحظة: نتخطى العناصر التي لا تحتوي منتجاً حقيقياً (item.product = null/محذوف) تماماً
+  // حتى لا تظهر "منتج محذوف" في قائمة الأعلى ربحية
   const productStats = new Map<string, ProductStat>();
   filteredOrders.forEach((order) => {
-    order.items.forEach((item) => {
-      const pId = typeof item.product === 'object' ? item.product._id : item.product;
-      const pName = typeof item.product === 'object' ? item.product.name : 'منتج';
+    (order.items || []).forEach((item) => {
+      if (!item) return;
+      const prod = item && typeof item.product === 'object' && item.product ? item.product : null;
+      if (!prod) return; // منتج محذوف من قاعدة البيانات → لا نحسبه في الإحصائيات
+      const pId = prod._id;
+      const pName = prod.name || 'منتج';
       const existing = productStats.get(pName) || { name: pName, qty: 0, revenue: 0, profit: null };
       existing.qty += item.quantity;
       existing.revenue += item.price * item.quantity;
@@ -193,7 +270,7 @@ export const AdminReportsPage: React.FC = () => {
     try {
       setIsExportingPdf(true);
       showToast('جاري تجهيز ملف الـ PDF... ⏳', 'info');
-      await exportElementToPdf(contentRef.current, `تقرير_مالي_الفيشاوي_${dateFilter}`);
+      await exportElementToPdf(contentRef.current, `تقرير_مالي_الفيشاوي_${dateRange.preset}`);
       showToast('تم تنزيل ملف PDF بنجاح ✅', 'success');
     } catch (err) {
       showError(err);
@@ -204,13 +281,17 @@ export const AdminReportsPage: React.FC = () => {
 
   const handleExportCSV = () => {
     try {
+      const periodLabel = dateRange.from && dateRange.to 
+        ? `${dateRange.from.toLocaleDateString('ar-EG')} - ${dateRange.to.toLocaleDateString('ar-EG')}`
+        : dateRange.preset !== 'custom' ? dateRange.preset : 'الكل';
+      
       const csvRows = [
-        ["التقرير المالي - مقهى الفيشاوي", `الفترة: ${dateFilter === 'today' ? 'اليوم' : dateFilter === 'week' ? 'آخر 7 أيام' : dateFilter === 'month' ? 'هذا الشهر' : 'الكل'}`],
-        ["المؤشر", "القيمة"],
-        ["إجمالي الإيرادات", `${totalRevenue} ج.م`],
-        ["إجمالي المصروفات", `${totalExpensesFiltered} ج.م`],
-        ["صافي الأرباح", `${netProfit} ج.م`],
-        ["هامش الربحية", `${profitMargin}%`],
+        ["التقرير المالي - مقهى الفيشاوي", `الفترة: ${periodLabel}`],
+        ["المؤشر", "القيمة الحالية", "قيمة الفترة السابقة", "نسبة التغير %"],
+        ["إجمالي الإيرادات", `${salesComparison.current.toLocaleString('ar-EG')}جنيها`, `${salesComparison.previous.toLocaleString('ar-EG')} جنيها`, `${salesComparison.changePercent >= 0 ? '+' : ''}${salesComparison.changePercent}%`],
+        ["إجمالي المصروفات", `${expensesComparison.current.toLocaleString('ar-EG')} جنيها`, `${expensesComparison.previous.toLocaleString('ar-EG')} جنيها`, `${expensesComparison.changePercent >= 0 ? '+' : ''}${expensesComparison.changePercent}%`],
+        ["صافي الأرباح", `${profitComparison.current.toLocaleString('ar-EG')} جنيها`, `${profitComparison.previous.toLocaleString('ar-EG')} جنيها`, `${profitComparison.changePercent >= 0 ? '+' : ''}${profitComparison.changePercent}%`],
+        ["هامش الربحية", `${profitMargin}%`, "", ""],
         ["", ""],
         ...topProducts.map((p, i) => [`أعلى ربحاً #${i + 1}`, `${p.name} — ${formatPrice(rankValue(p))} (${formatNumber(p.qty)} وحدة)`] as [string, string]),
         ...bottomProducts.map((p, i) => [`الأقل ربحاً #${i + 1}`, `${p.name} — ${formatPrice(rankValue(p))} (${formatNumber(p.qty)} وحدة)`] as [string, string]),
@@ -220,7 +301,7 @@ export const AdminReportsPage: React.FC = () => {
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.setAttribute("href", url);
-      link.setAttribute("download", `تقرير_مالي_${dateFilter}.csv`);
+      link.setAttribute("download", `تقرير_مالي_${periodLabel.replace(/[\/\s]/g, '_')}.csv`);
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -246,37 +327,43 @@ export const AdminReportsPage: React.FC = () => {
           disabled={isExportingPdf}
           className="inline-flex items-center gap-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white py-2.5 px-4 rounded-2xl text-xs font-bold transition shadow-lg cursor-pointer no-print border border-blue-500/30"
         >
-          <Download className="w-4 h-4" />
+<Download className="w-4 h-4" />
           <span>تصدير التقرير (PDF / إكسل)</span>
         </button>
       </div>
-      
+       
       {/* Filter Bar */}
       <div className="bg-white rounded-2xl border border-gray-200/80 p-4 shadow-2xs flex flex-col sm:flex-row items-center justify-between gap-3 text-right text-gray-900">
         <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
-          <span className="text-[11px] font-bold text-gray-500 ml-1 flex items-center gap-1">
-            <Calendar className="w-3.5 h-3.5 text-[#2e5b9f]" /> الفترة:
-          </span>
-          {(
-            [
-              { id: 'all', label: 'كل الفترات' },
-              { id: 'today', label: 'اليوم' },
-              { id: 'week', label: 'آخر 7 أيام' },
-              { id: 'month', label: 'هذا الشهر' },
-            ] as const
-          ).map((df) => (
+          <DateRangeFilter
+            value={dateRange}
+            onChange={setDateRange}
+            maxDate={new Date()}
+            showPresets={true}
+            className="min-w-[220px]"
+          />
+          <select
+            value={categoryFilter}
+            onChange={(e) => setCategoryFilter(e.target.value)}
+            className="bg-white border border-gray-200 rounded-xl px-3 py-2 text-xs text-gray-900 focus:outline-none focus:ring-2 focus:ring-[#2e5b9f]/20 focus:border-[#2e5b9f] cursor-pointer"
+          >
+            <option value="all">كل الفئات</option>
+            <option value="inventory">مشتريات المخزون</option>
+            <option value="utilities">المرافق</option>
+            <option value="salaries">الرواتب</option>
+            <option value="rent">الإيجار</option>
+            <option value="other">أخرى</option>
+          </select>
+          {activeFiltersCount > 0 && (
             <button
-              key={df.id}
-              onClick={() => setDateFilter(df.id)}
-              className={`py-1.5 px-3 rounded-xl text-xs font-bold transition whitespace-nowrap cursor-pointer ${
-                dateFilter === df.id
-                  ? 'bg-[#2e5b9f] text-white shadow-2xs'
-                  : 'bg-gray-50 text-gray-600 border border-gray-200/60 hover:bg-gray-100'
-              }`}
+              onClick={handleFilterReset}
+              className="inline-flex items-center gap-1 py-1.5 px-2.5 rounded-xl text-xs font-bold text-rose-600 bg-rose-50 border border-rose-200 hover:bg-rose-100 transition cursor-pointer whitespace-nowrap"
+              title="مسح الفلاتر"
             >
-              {df.label}
+              <X className="w-3.5 h-3.5" />
+              مسح
             </button>
-          ))}
+          )}
         </div>
 
         <span className="text-xs font-mono font-bold text-gray-500">
@@ -286,34 +373,46 @@ export const AdminReportsPage: React.FC = () => {
 
       {/* KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <AttaStatCard
+        <ComparisonStatCard
           title="إجمالي الإيرادات"
-          value={formatPrice(totalRevenue)}
+          value={formatPrice(salesComparison.current)}
           accentColor="blue"
           icon={<TrendingUp className="w-5 h-5 text-blue-500" />}
-          periodLabel="الإيرادات الكلية"
+          comparison={salesComparison}
         />
-        <AttaStatCard
+        <ComparisonStatCard
           title="إجمالي المصروفات"
-          value={formatPrice(totalExpensesFiltered)}
+          value={formatPrice(expensesComparison.current)}
           accentColor="rose"
           icon={<DollarSign className="w-5 h-5 text-rose-500" />}
-          periodLabel="المصروفات الكلية"
+          invertColors
+          comparison={expensesComparison}
         />
-        <AttaStatCard
+        <ComparisonStatCard
           title="صافي الربح"
-          value={formatPrice(netProfit)}
+          value={formatPrice(profitComparison.current)}
           accentColor="emerald"
           icon={<Award className="w-5 h-5 text-emerald-500" />}
-          periodLabel="الأرباح المحققة"
+          comparison={profitComparison}
         />
-        <AttaStatCard
+        <ComparisonStatCard
           title="هامش الربح التشغيلي"
           value={`%${formatNumber(profitMargin)}`}
           accentColor="purple"
           icon={<BarChart3 className="w-5 h-5 text-purple-500" />}
           periodLabel={profitMargin > 50 ? 'معدل ممتاز' : profitMargin > 30 ? 'معدل جيد' : 'يحتاج تحسين'}
         />
+      </div>
+
+      {/* 🛒 تفصيل المصروفات: تشغيلية vs مشتريات مخزون */}
+      <div className="flex flex-wrap items-center gap-2 -mt-2">
+        <span className="inline-flex items-center gap-1.5 py-1.5 px-3 rounded-full bg-rose-50 border border-rose-100 text-[11px] font-bold text-[#9f1239]">
+          💸 مصروفات تشغيلية: <span className="font-mono">{formatPrice(operatingFiltered)}</span>
+        </span>
+        <span className="inline-flex items-center gap-1.5 py-1.5 px-3 rounded-full bg-blue-50 border border-blue-100 text-[11px] font-bold text-[#2e5b9f]">
+          🛒 مشتريات مخزون: <span className="font-mono">{formatPrice(purchasesFiltered)}</span>
+        </span>
+        <span className="text-[10px] text-gray-400">— صافي الربح محسوب بعد خصم الاتنين معاً</span>
       </div>
 
       {/* Profitability Comparison Grid */}
@@ -485,19 +584,48 @@ export const AdminReportsPage: React.FC = () => {
 
         {/* Recent Orders Summary */}
         <div className="bg-white rounded-2xl border border-gray-200/80 p-5 shadow-2xs">
-        <div className="flex items-center justify-between pb-3 mb-3 border-b border-gray-100">
+        <div className="flex items-center justify-between pb-3 mb-4 border-b border-gray-100">
           <span className="text-xs text-gray-400 font-mono">آخر العمليات</span>
           <h3 className="font-bold text-base text-gray-900">ملخص الطلبات والمصروفات</h3>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="space-y-2">
-            <h4 className="text-xs font-bold text-gray-700 mb-2">أحدث الطلبات</h4>
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-x-6 gap-y-5">
+          {/* أحدث الطلبات */}
+          <div className="space-y-2 min-w-0">
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <span className="w-6 h-6 rounded-lg bg-[#2e5b9f]/10 flex items-center justify-center">
+                  <ReceiptText className="w-3.5 h-3.5 text-[#2e5b9f]" />
+                </span>
+                <h4 className="text-xs font-bold text-gray-700">أحدث الطلبات</h4>
+              </div>
+              <span className="text-[10px] font-mono text-gray-400">{formatNumber(filteredOrders.length)} طلب</span>
+            </div>
             {filteredOrders.slice(0, 5).map((order) => (
-              <div key={order._id} className="flex items-center justify-between p-2.5 rounded-xl bg-[#faf8f5] border border-gray-100 text-xs">
-                <span className="font-mono font-bold text-gray-900">#{order.orderNumber.slice(-4)}</span>
-                <span className="text-gray-500 font-mono">{formatDate(order.createdAt)}</span>
-                <span className="font-bold font-mono text-[#2e5b9f]">{formatPrice(order.totalAmount)}</span>
+              <div key={order._id} className="flex items-center justify-between gap-2 p-3 rounded-xl bg-white border border-gray-100 hover:border-[#2e5b9f]/30 hover:shadow-sm transition">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="w-7 h-7 rounded-lg bg-[#faf8f5] border border-gray-100 flex items-center justify-center font-mono text-[10px] font-black text-gray-700 shrink-0">
+                    #{String(order.orderNumber || order._id || '').slice(-4)}
+                  </span>
+                  <div className="flex flex-col min-w-0">
+                    <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full w-fit ${
+                      order.status === 'completed'
+                        ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                        : order.status === 'pending'
+                        ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                        : 'bg-rose-50 text-rose-600 border border-rose-200'
+                    }`}>
+                      {order.status === 'completed' ? 'مكتمل' : order.status === 'pending' ? 'قيد التحضير' : 'ملغي'}
+                    </span>
+                    <span className="text-[10px] text-gray-400 font-mono mt-0.5">
+                      {(order.items || []).length} أصناف • {order.orderType === 'dine-in' ? `طاولة #${order.tableNumber || 1}` : 'سفري'}
+                    </span>
+                  </div>
+                </div>
+                <div className="flex flex-col items-end gap-0.5 shrink-0">
+                  <span className="font-bold font-mono text-[#2e5b9f] text-xs">{formatPrice(order.totalAmount)}</span>
+                  <span className="text-gray-400 font-mono text-[10px]">{formatDate(order.createdAt)}</span>
+                </div>
               </div>
             ))}
             {filteredOrders.length === 0 && (
@@ -505,13 +633,38 @@ export const AdminReportsPage: React.FC = () => {
             )}
           </div>
 
-          <div className="space-y-2">
-            <h4 className="text-xs font-bold text-gray-700 mb-2">أحدث المصروفات</h4>
+          {/* أحدث المصروفات */}
+          <div className="space-y-2 min-w-0">
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <span className="w-6 h-6 rounded-lg bg-rose-50 flex items-center justify-center">
+                  <DollarSign className="w-3.5 h-3.5 text-rose-500" />
+                </span>
+                <h4 className="text-xs font-bold text-gray-700">أحدث المصروفات</h4>
+              </div>
+              <span className="text-[10px] font-mono text-gray-400">{formatNumber(filteredExpenses.length)} قيد</span>
+            </div>
             {filteredExpenses.slice(0, 5).map((exp) => (
-              <div key={exp._id} className="flex items-center justify-between p-2.5 rounded-xl bg-[#faf8f5] border border-gray-100 text-xs">
-                <span className="font-bold text-gray-900 truncate max-w-[150px]">{exp.description}</span>
-                <span className="text-gray-500 font-mono">{formatDate(exp.date)}</span>
-                <span className="font-bold font-mono text-[#9f1239]">{formatPrice(exp.amount)}</span>
+              <div key={exp._id} className="flex items-center justify-between gap-2 p-3 rounded-xl bg-white border border-gray-100 hover:border-rose-200 hover:shadow-sm transition">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${
+                    exp.category === 'inventory' ? 'bg-blue-50 border border-blue-100' : 'bg-rose-50 border border-rose-100'
+                  }`}>
+                    {exp.category === 'inventory' ? '🛒' : '💸'}
+                  </span>
+                  <div className="flex flex-col min-w-0">
+                    <span className="font-bold text-gray-900 text-xs truncate max-w-[160px]">{exp.description}</span>
+                    <span className="text-[10px] text-gray-400 font-mono mt-0.5">
+                      {exp.category === 'inventory' ? 'مشتريات مخزون' : EXPENSE_CATEGORY_META[exp.category]?.label || 'مصروف'}
+                    </span>
+                  </div>
+                </div>
+                <div className="flex flex-col items-end gap-0.5 shrink-0">
+                  <span className={`font-bold font-mono text-xs ${exp.category === 'inventory' ? 'text-[#2e5b9f]' : 'text-[#9f1239]'}`}>
+                    {formatPrice(exp.amount)}
+                  </span>
+                  <span className="text-gray-400 font-mono text-[10px]">{formatDate(exp.date)}</span>
+                </div>
               </div>
             ))}
             {filteredExpenses.length === 0 && (
@@ -529,7 +682,9 @@ export const AdminReportsPage: React.FC = () => {
         onExportPDF={handleExportPDF}
         onExportCSV={handleExportCSV}
         title="تصدير التقرير المالي للكافيه"
-        periodLabel={dateFilter === 'today' ? 'اليوم' : dateFilter === 'week' ? 'الأسبوع' : dateFilter === 'month' ? 'الشهر' : 'العام'}
+        periodLabel={dateRange.from && dateRange.to 
+          ? `${formatDate(dateRange.from)} - ${formatDate(dateRange.to)}`
+          : dateRange.preset !== 'custom' ? dateRange.preset : 'الكل'}
       />
     </div>
   );

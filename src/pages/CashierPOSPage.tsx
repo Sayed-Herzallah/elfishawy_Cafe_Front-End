@@ -1,14 +1,17 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { productService, categoryService } from '../services/catalogService';
 import { orderService } from '../services/opsService';
-import { syncAllProductsStock } from '../utils/stockSync';
-import { Product, Category, Order } from '../types';
+import { inventoryService } from '../services/opsService';
+// ⚡ تمت إزالة syncAllProductsStock — كان بيبطّئ تحميل الصفحة وبيعيد كتابة
+// تعديلات الأدمن اليدوية على الجرامات (stockQuantity) بقيمة محسوبة من الوصفات
+import { Product, Category, Order, InventoryItem } from '../types';
 import { useNotification } from '../contexts/NotificationContext';
 import { ReceiptModal } from '../components/ui/ReceiptModal';
 import { Modal } from '../components/ui/Modal';
 import { LoadingSkeleton } from '../components/ui/LoadingSkeleton';
 import { ConfirmDialog } from '../components/ui/ConfirmDialog';
 import { formatPrice, formatNumber, formatTime } from '../utils/formatters';
+import { toBase } from '../utils/stockSync';
 import {
   Plus,
   Trash2,
@@ -56,28 +59,39 @@ export const CashierPOSPage: React.FC = () => {
 
   const { showToast, showError } = useNotification();
 
+  const applyProducts = (data: Product[]) => setProducts(data);
+  const applyOrders = (data: Order[]) => {
+    // Only allow Completed orders to be visible to the cashier POS view
+    const completedOrders = data.filter((o: Order) => o.status === 'completed');
+    setAllOrders(completedOrders);
+    setRecentOrders(completedOrders.slice(0, 4));
+  };
+
   const loadData = async () => {
     try {
       setIsLoading(true);
-      await syncAllProductsStock().catch((e) => console.error('Initial stock sync error:', e));
+      // ⚡ تحسين السرعة: كل طلب بيحل لوحده — شبكة المنتجات مبتستنيش الطلبات
+      // (الطلبات بتتاخر أحياناً بسبب حجمها، وفل ما كانت Promise.all بتحبس الشاشة كلها)
+      const prodPromise = productService.listProducts();
+      const catPromise = categoryService.listCategories();
+      const ordPromise = orderService.getOrders();
 
-      const [prodRes, catRes, ordRes] = await Promise.all([
-        productService.listProducts(),
-        categoryService.listCategories(),
-        orderService.getOrders(),
-      ]);
+      prodPromise
+        .then((res) => { if (res.success && res.data) applyProducts(res.data); })
+        .catch((err) => showError(err))
+        .finally(() => setIsLoading(false));
 
-      if (prodRes.success && prodRes.data) setProducts(prodRes.data);
-      if (catRes.success && catRes.data) setCategories(catRes.data);
-      if (ordRes.success && ordRes.data) {
-        // Only allow Completed orders to be visible to the cashier POS view
-        const completedOrders = ordRes.data.filter((o: Order) => o.status === 'completed');
-        setAllOrders(completedOrders);
-        setRecentOrders(completedOrders.slice(0, 4));
-      }
+      catPromise
+        .then((res) => { if (res.success && res.data) setCategories(res.data); })
+        .catch((err) => console.error('Silent categories load error:', err));
+
+      ordPromise
+        .then((res) => { if (res.success && res.data) applyOrders(res.data); })
+        .catch((err) => console.error('Silent orders load error:', err));
+
+      await Promise.allSettled([prodPromise, catPromise, ordPromise]);
     } catch (err) {
       showError(err);
-    } finally {
       setIsLoading(false);
     }
   };
@@ -85,23 +99,21 @@ export const CashierPOSPage: React.FC = () => {
   useEffect(() => {
     loadData();
 
-    // Poll for updates silently every 8 seconds so restocks and order updates reflect quickly
+    // 🔄 تحديث صامت دوري — بيشتغل بس لما التاب مفتوح، ومن غير ما يلمس حالة التحميل
+    // فمش بيمسح الشاشة ولا بيعيد رسم الشبكات على الفاضي
     const interval = setInterval(async () => {
+      if (document.hidden) return;
       try {
         const [prodRes, ordRes] = await Promise.all([
           productService.listProducts(),
           orderService.getOrders(),
         ]);
-        if (prodRes.success && prodRes.data) setProducts(prodRes.data);
-        if (ordRes.success && ordRes.data) {
-          const completedOrders = ordRes.data.filter((o: Order) => o.status === 'completed');
-          setAllOrders(completedOrders);
-          setRecentOrders(completedOrders.slice(0, 4));
-        }
+        if (prodRes.success && prodRes.data) applyProducts(prodRes.data);
+        if (ordRes.success && ordRes.data) applyOrders(ordRes.data);
       } catch (err) {
         console.error('Silent POS data refresh error:', err);
       }
-    }, 8000);
+    }, 15000);
 
     return () => clearInterval(interval);
   }, []);
@@ -215,10 +227,18 @@ export const CashierPOSPage: React.FC = () => {
         notes: orderNote,
       };
 
-      const res = await orderService.createOrder(orderPayload);
-      if (res.success && res.data) {
+      const orderRes = await orderService.createOrder(orderPayload);
+      if (orderRes.success && orderRes.data) {
+        // ⚡ خصم المخزون من المنتجات بعد تأكيد الطلب
+        await deductStockFromOrder(
+          orderRes.data.items.map((it) => ({
+            product: typeof it.product === 'object' ? it.product._id : it.product,
+            quantity: it.quantity,
+          }))
+        );
+
         showToast('تم تأكيد الطلب وحفظ الفاتورة بنجاح!');
-        setSelectedReceiptOrder(res.data);
+        setSelectedReceiptOrder(orderRes.data);
         handleClearCart();
         loadData();
       }
@@ -229,7 +249,43 @@ export const CashierPOSPage: React.FC = () => {
     }
   };
 
-  // Edit Order Functions
+  /**
+   * Deduct purchased quantities from product stock after order creation.
+   * Updates each product's stockQuantity on the server.
+   */
+  const deductStockFromOrder = async (items: { product: string; quantity: number }[]) => {
+    try {
+      for (const item of items) {
+        const productId = item.product;
+        const purchasedQty = item.quantity;
+
+        const product = products.find((p) => p._id === productId);
+        if (!product) continue;
+
+        const newStockQty = Math.max(0, (product.stockQuantity || 0) - purchasedQty);
+
+        const formData = new FormData();
+        formData.append('name', product.name);
+        formData.append('price', String(product.price));
+
+        const catId = typeof product.category === 'string'
+          ? product.category
+          : (product.category?._id || '');
+        formData.append('category', catId);
+
+        formData.append('stockQuantity', String(newStockQty));
+        formData.append('inStock', String(newStockQty > 0));
+
+        if (product.description) {
+          formData.append('description', product.description);
+        }
+
+        await productService.updateProduct(productId, formData);
+      }
+    } catch (err) {
+      console.error('Failed to deduct stock from order:', err);
+    }
+  };
   const handleStartEditOrder = (order: Order) => {
     // Only allow editing pending orders
     if (order.status !== 'pending') {
@@ -238,7 +294,8 @@ export const CashierPOSPage: React.FC = () => {
     }
     
     // Populate cart from order items
-    const cartItems = order.items.map(item => ({
+    const orderItems = Array.isArray(order.items) ? order.items : [];
+    const cartItems = orderItems.map(item => ({
       product: typeof item.product === 'string' 
         ? products.find(p => p._id === item.product) 
         : item.product,
@@ -293,7 +350,11 @@ export const CashierPOSPage: React.FC = () => {
   };
 
   const filteredProducts = products.filter((p) => {
-    const catId = typeof p.category === 'string' ? p.category : p.category._id;
+    if (!p || typeof p !== 'object') return false;
+    // 🛡️ حماية من تصنيف محذوف (null) كانت بتكسر الصفحة كلها
+    const catId = p.category
+      ? (typeof p.category === 'string' ? p.category : p.category._id)
+      : '';
     const matchesCat = activeCategory === 'all' || catId === activeCategory;
     const matchesSearch =
       searchQuery.trim() === '' ||
@@ -303,14 +364,17 @@ export const CashierPOSPage: React.FC = () => {
   });
 
   // Filter today's orders by drink product name, order ID, or table with specific modes
+  // 🛡️ حمايات null: طلب ناقص أو منتج محذوف كانت بتعمل TypeError وشاشة بيضاء كاملة
   const filteredTodayOrders = useMemo(() => {
     return allOrders.filter((ord) => {
-      const q = orderSearchText.trim().toLowerCase();
+      if (!ord || typeof ord !== 'object') return false;
+      const items = Array.isArray(ord.items) ? ord.items : [];
+      const q = (orderSearchText || '').trim().toLowerCase();
       if (!q) return true;
 
       if (todaySearchMode === 'orderNumber') {
         const cleanQ = q.replace('#', '');
-        return ord.orderNumber.toLowerCase().includes(cleanQ);
+        return String(ord.orderNumber || '').toLowerCase().includes(cleanQ);
       }
 
       if (todaySearchMode === 'table') {
@@ -320,19 +384,19 @@ export const CashierPOSPage: React.FC = () => {
       }
 
       if (todaySearchMode === 'product') {
-        return ord.items.some((it) => {
-          const name = typeof it.product === 'object' ? it.product.name : '';
-          return name.toLowerCase().includes(q);
+        return items.some((it) => {
+          const name = it && typeof it.product === 'object' && it.product ? it.product.name : '';
+          return String(name).toLowerCase().includes(q);
         });
       }
 
       // 'all' mode
       const cleanQ = q.replace('#', '');
-      const matchesId = ord.orderNumber.toLowerCase().includes(cleanQ) || ord._id.toLowerCase().includes(cleanQ);
+      const matchesId = String(ord.orderNumber || '').toLowerCase().includes(cleanQ) || String(ord._id || '').toLowerCase().includes(cleanQ);
       const matchesTable = ord.tableNumber ? String(ord.tableNumber).includes(cleanQ) : false;
-      const matchesDrink = ord.items.some((it) => {
-        const pName = typeof it.product === 'object' ? it.product.name : '';
-        return pName.toLowerCase().includes(q);
+      const matchesDrink = items.some((it) => {
+        const pName = it && typeof it.product === 'object' && it.product ? it.product.name : '';
+        return String(pName).toLowerCase().includes(q);
       });
 
       return matchesId || matchesTable || matchesDrink;
@@ -376,7 +440,7 @@ export const CashierPOSPage: React.FC = () => {
                   title="نقر لطباعة أو معاينة الفاتورة"
                 >
                   <Printer className="w-3.5 h-3.5 text-[#2e5b9f]" />
-                  <span className="font-bold">#{ord.orderNumber.slice(-4)}</span>
+                  <span className="font-bold">#{String(ord.orderNumber || '----').slice(-4)}</span>
                 </button>
                 {ord.status === 'pending' && (
                   <button
@@ -531,7 +595,7 @@ export const CashierPOSPage: React.FC = () => {
               <div className="mb-3 p-3 rounded-xl bg-amber-50 border border-amber-200 flex items-center justify-between">
                 <span className="text-xs font-bold text-amber-800 flex items-center gap-1.5">
                   <FileText className="w-3.5 h-3.5" />
-                  وضع التعديل - طلب #{editingOrder.orderNumber.slice(-4)}
+                  وضع التعديل - طلب #{String(editingOrder.orderNumber || editingOrder._id || '').slice(-4)}
                 </span>
                 <button
                   onClick={handleCancelEditMode}
@@ -662,11 +726,14 @@ export const CashierPOSPage: React.FC = () => {
                     {/* Product Info */}
                     <div className="text-right flex-1 min-h-[50px] flex flex-col justify-between">
                       <div>
-                        <h3 className="font-bold text-gray-900 text-xs leading-snug line-clamp-1 mb-0.5">
+                        <h3 className="font-bold text-gray-900 text-xs leading-snug line-clamp-1 mb-1">
                           {product.name}
                         </h3>
-                        <span className="text-[10px] text-gray-500 font-mono">
-                          {formatPrice(product.price)}
+                        {/* 💰 السعر بارز وواضح — أهم معلومة للكاشير */}
+                        <span className="inline-flex items-baseline gap-0.5 bg-gradient-to-l from-[#2e5b9f]/[0.08] to-[#4a7cc9]/[0.12] border border-[#2e5b9f]/20 px-2 py-0.5 rounded-lg">
+                          <span className="text-sm font-extrabold font-mono text-[#2e5b9f] tracking-tight">
+                            {formatPrice(product.price)}
+                          </span>
                         </span>
                       </div>
 
@@ -706,10 +773,18 @@ export const CashierPOSPage: React.FC = () => {
         maxWidth="lg"
       >
         <div className="space-y-4 text-right font-sans">
-          {/* Quick Header Metric - Hidden totals for security */}
-          <div className="p-3 bg-[#faf8f5] border border-gray-200/80 rounded-2xl text-center shadow-3xs flex items-center justify-between text-xs text-gray-700">
-            <span>إجمالي فواتير اليوم الصادرة: <strong className="text-[#2e5b9f] font-mono text-sm">{allOrders.length}</strong></span>
-            {/* <span>القيمة الإجمالية: <strong className="text-emerald-700 font-mono text-sm">{formatPrice(todayRevenue)}</strong></span> */}
+          {/* 🔢 عداد بسيط — عدد فواتير اليوم فقط بدون أي أرقام مالية */}
+          <div className="flex items-center justify-between gap-2 p-3 bg-[#faf8f5] border border-gray-200/80 rounded-2xl shadow-2xs">
+            <span className="text-xs font-bold text-gray-600 flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-[#2e5b9f] animate-pulse" />
+              إجمالي فواتير اليوم الصادرة
+            </span>
+            <span className="text-sm font-extrabold font-mono text-[#2e5b9f]">
+              {formatNumber(allOrders.length)}
+              {orderSearchText.trim() && (
+                <span className="text-[11px] text-gray-500 font-bold"> • معروض {formatNumber(filteredTodayOrders.length)}</span>
+              )}
+            </span>
           </div>
 
           {/* Search Inputs & Mode Tabs */}
@@ -798,7 +873,10 @@ export const CashierPOSPage: React.FC = () => {
                 return (
                   <div
                     key={ord._id}
-                    className="p-3.5 rounded-2xl bg-white border border-gray-200/80 shadow-2xs hover:border-gray-300 transition flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-right"
+                    onClick={() => setSelectedReceiptOrder(ord)}
+                    role="button"
+                    title="اضغط لعرض وطباعة الفاتورة مباشرة"
+                    className="p-3.5 rounded-2xl bg-white border border-gray-200/80 shadow-2xs hover:border-[#2e5b9f]/50 hover:shadow-md hover:shadow-[#2e5b9f]/5 active:scale-[0.99] transition-all cursor-pointer flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-right group"
                     dir="rtl"
                   >
                     <div className="space-y-1 text-right flex-1">
@@ -824,8 +902,8 @@ export const CashierPOSPage: React.FC = () => {
 
                       {/* Drink items preview */}
                       <div className="text-xs text-gray-600 flex flex-wrap gap-1.5 pt-1">
-                        {ord.items.map((item, itemIdx) => {
-                          const name = typeof item.product === 'object' ? item.product.name : 'مشروب';
+                        {(ord.items || []).map((item, itemIdx) => {
+                          const name = item && typeof item.product === 'object' && item.product ? (item.product as any).name : 'مشروب';
                           return (
                             <span key={itemIdx} className="bg-[#faf8f5] border border-gray-100 px-2 py-0.5 rounded text-[11px] font-medium">
                               {name} <strong className="text-[#2e5b9f] font-mono">×{formatNumber(item.quantity)}</strong>
@@ -843,15 +921,17 @@ export const CashierPOSPage: React.FC = () => {
                     </div>
 
                     <div className="flex items-center justify-between sm:justify-end gap-3 pt-2 sm:pt-0 border-t sm:border-t-0 border-gray-100">
+                      {/* 👁️ الفاتورة بتفتح بالضغط على الكارت كله — الزرار للطباعة السريعة */}
                       <button
-                        onClick={() => {
+                        onClick={(e) => {
+                          e.stopPropagation();
                           setSelectedReceiptOrder(ord);
                         }}
-                        className="inline-flex items-center gap-1 bg-[#2e5b9f] hover:bg-[#244b85] text-white py-1.5 px-3 rounded-lg text-xs font-bold transition shadow-2xs cursor-pointer"
-                        title="طباعة الفاتورة"
+                        className="inline-flex items-center gap-1.5 bg-gradient-to-l from-[#4a7cc9] to-[#2e5b9f] hover:from-[#2e5b9f] hover:to-[#1d4277] text-white py-2 px-4 rounded-xl text-xs font-bold transition-all shadow-md shadow-[#2e5b9f]/25 cursor-pointer"
+                        title="عرض وطباعة الفاتورة"
                       >
                         <Printer className="w-3.5 h-3.5" />
-                        <span>طباعة الفاتورة</span>
+                        <span>عرض / طباعة</span>
                       </button>
                     </div>
                   </div>

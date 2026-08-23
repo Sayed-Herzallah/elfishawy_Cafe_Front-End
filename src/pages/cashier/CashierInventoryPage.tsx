@@ -161,7 +161,7 @@ export const CashierInventoryPage: React.FC = () => {
         });
 
       if (expRes.success) {
-        showToast(`تم توريد ${qty} ${selectedItem.unit} بنجاح وتسجيل المصروفات بقيمة ${total} ج.م`);
+        showToast(`تم توريد ${qty} ${selectedItem.unit} بنجاح وتسجيل المصروفات بقيمة ${total} جنيها`);
         setIsPurchaseModalOpen(false);
 
         // ✅ Auto-sync product stockQuantity for all products linked to this inventory item
@@ -533,7 +533,7 @@ export const CashierInventoryPage: React.FC = () => {
             />
 
             <Input
-              label="سعر تكلفة الوحدة (ج.م)"
+              label="سعر تكلفة الوحدة ()"
               type="number"
               min="0.1"
               step="any"
@@ -553,7 +553,7 @@ export const CashierInventoryPage: React.FC = () => {
           </div>
 
           <Input
-            label="المبلغ الإجمالي لفاتورة الشراء (ج.م) *"
+            label="المبلغ الإجمالي لفاتورة الشراء () *"
             type="number"
             min="1"
             placeholder="الإجمالي"

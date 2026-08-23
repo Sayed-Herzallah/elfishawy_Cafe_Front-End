@@ -20,11 +20,12 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ order, isOpen, onClo
   const formattedDate = formatDateTime(order.createdAt);
 
   const cashierName =
-    typeof order.cashierId === 'object'
-      ? order.cashierId.userName
-      : order.cashierId || 'الكاشير';
+    order.cashierId && typeof order.cashierId === 'object'
+      ? (order.cashierId as any).userName || 'الكاشير'
+      : (order.cashierId as string) || 'الكاشير';
 
-  const totalItemsCount = order.items.reduce((acc, item) => acc + item.quantity, 0);
+  const receiptItems = Array.isArray(order.items) ? order.items : [];
+  const totalItemsCount = receiptItems.reduce((acc, item) => acc + (item?.quantity || 0), 0);
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto flex items-center justify-center p-4">
@@ -53,7 +54,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ order, isOpen, onClo
             </h2>
             <p className="text-xs font-mono text-gray-500 mt-0.5">Elfishawy Cafe — Authentic Taste</p>
             <div className="mt-3 bg-gray-50 py-1.5 px-3 rounded-xl border border-gray-200/80 flex items-center justify-between text-xs text-gray-700" dir="rtl">
-              <span>فاتورة طلب: <strong className="text-gray-900 font-mono text-sm font-bold">#{order.orderNumber}</strong></span>
+              <span>فاتورة طلب: <strong className="text-gray-900 font-mono text-sm font-bold">#{String(order.orderNumber || order._id || '').slice(-8)}</strong></span>
               <span className="font-mono text-[11px] text-gray-500">{formattedDate}</span>
             </div>
             <div className="mt-1.5 flex items-center justify-between text-xs text-gray-600 px-1" dir="rtl">
@@ -79,8 +80,8 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ order, isOpen, onClo
               <span>الإجمالي</span>
             </div>
             <div className="space-y-3">
-              {order.items.map((item, idx) => {
-                const prodName = typeof item.product === 'object' ? item.product.name : 'صنف';
+              {receiptItems.map((item, idx) => {
+                const prodName = item && typeof item.product === 'object' && item.product ? (item.product as any).name : 'صنف';
                 return (
                   <div key={idx} className="flex justify-between items-center text-sm py-0.5" dir="rtl">
                     <span className="font-bold text-gray-800 text-sm">

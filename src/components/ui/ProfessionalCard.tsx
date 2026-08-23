@@ -25,8 +25,8 @@ export interface ProfessionalCardProps {
     color?: string;
   }>;
   amounts?: {
-    primary?: string;
-    secondary?: string;
+    primary?: string | number;
+    secondary?: string | number;
     currency?: string;
   };
   dates?: {
@@ -47,6 +47,8 @@ export interface ProfessionalCardProps {
   isSelected?: boolean;
   className?: string;
   printable?: boolean;
+  /** وضع مضغوط: كارت أصغر بتفاصيل أقل (يُستخدم في قوائم المشتريات والمصروفات) */
+  compact?: boolean;
 }
 
 const statusStyles: Record<CardStatus, { bg: string; text: string; border: string; icon: ReactNode }> = {
@@ -91,7 +93,7 @@ function formatDate(dateStr?: string) {
   }).replace(/[٠-٩]/g, (d) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d).toString());
 }
 
-function formatCurrency(amount: string | number, currency = 'ج.م') {
+function formatCurrency(amount: string | number, currency = 'جنيها') {
   const num = typeof amount === 'string' ? parseFloat(amount) : amount;
   if (isNaN(num)) return `0 ${currency}`;
   return `${num.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 })} ${currency}`;
@@ -104,8 +106,8 @@ export const ProfessionalCard: React.FC<ProfessionalCardProps> = ({
   title,
   subtitle,
   metadata = [],
-  amounts,
-  dates,
+  amounts = {},
+  dates = {},
   assignee,
   tags = [],
   children,
@@ -115,15 +117,15 @@ export const ProfessionalCard: React.FC<ProfessionalCardProps> = ({
   isSelected = false,
   className = '',
   printable = false,
+  compact = false,
 }) => {
   const statusStyle = statusStyles[status] || statusStyles.draft;
   const variantColor = variantColors[variant] || variantColors.default;
   const variantIcon = variantIcons[variant] || variantIcons.default;
 
-  const handleClick = (e: React.MouseEvent) => {
-    if (actions.some(a => e.target === (e.currentTarget as any))) return;
-    onClick?.();
-  };
+const handleClick = (e: React.MouseEvent) => {
+  onClick?.();
+};
 
   const handleActionClick = (action: ActionButton, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -165,143 +167,221 @@ export const ProfessionalCard: React.FC<ProfessionalCardProps> = ({
       )}
 
       {/* Main Card Content */}
-      <div className="p-5 print:p-0">
-        {/* Header Row */}
-        <div className="flex items-start justify-between gap-3 mb-4">
-          <div className="flex items-center gap-3 flex-1 min-w-0">
-            <div className={`w-11 h-11 rounded-xl flex items-center justify-center ${variantColor.bg} ${variantColor.text} shrink-0`}>
-              {variantIcon}
+      {compact ? (
+        /* ═══ الوضع المضغوط: صفّان ضيقان يستغلّان العرض بالكامل ═══ */
+        <div className="p-3.5 print:p-0">
+          {/* الصف الأول: أيقونة + عنوان مقابل المبلغ + الحالة */}
+          <div className="flex items-center gap-2.5">
+            <div
+              className={`flex items-center justify-center shrink-0 w-9 h-9 rounded-lg ${variantColor.bg} ${variantColor.text}`}
+            >
+              {React.cloneElement(variantIcon as React.ReactElement<{ className?: string }>, { className: 'w-4 h-4' })}
             </div>
-            <div className="min-w-0">
-              <h3 className="font-bold text-base text-gray-900 truncate">{title}</h3>
-              {subtitle && <p className="text-xs text-gray-500 truncate mt-0.5">{subtitle}</p>}
-            </div>
-          </div>
-          
-          <div className="flex items-center gap-2 shrink-0">
-            {/* Status Badge */}
-            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold ${statusStyle.bg} ${statusStyle.text} ${statusStyle.border}`}>
-              {statusStyle.icon}
-              <span className="ml-1 capitalize">{status}</span>
-            </span>
-          </div>
-        </div>
 
-        {/* Amounts */}
-        {amounts && (
-          <div className="mb-4 flex items-center gap-4 flex-wrap">
-            {amounts.primary && (
-              <div className="flex items-center gap-1.5">
-                <DollarSign className="w-4 h-4 text-emerald-600" />
-                <span className="text-lg font-bold font-mono text-emerald-700">{formatCurrency(amounts.primary)}</span>
+            <div className="min-w-0 flex-1">
+              <h3 className="font-bold text-gray-900 truncate text-sm">{title}</h3>
+              {subtitle && (
+                <p className="text-gray-500 truncate mt-0.5 text-[10px]">{subtitle}</p>
+              )}
+            </div>
+
+            {amounts?.primary && (
+              <div className="text-left shrink-0">
+                <span className="block font-bold font-mono text-emerald-700 text-sm leading-tight whitespace-nowrap">
+                  {formatCurrency(amounts.primary)}
+                </span>
                 {amounts.secondary && (
-                  <span className="text-xs text-gray-500 font-mono">({formatCurrency(amounts.secondary)})</span>
+                  <span className="block text-[10px] text-gray-400 font-mono whitespace-nowrap">
+                    ({formatCurrency(amounts.secondary)})
+                  </span>
                 )}
               </div>
             )}
-          </div>
-        )}
 
-        {/* Metadata Grid */}
-        {(metadata.length > 0 || dates.created || dates.due || assignee) && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-4 text-right">
-            {metadata.map((meta, idx) => (
-              <div key={idx} className="p-3 bg-[#faf8f5] rounded-xl border border-gray-100">
-                <div className="flex items-center gap-1.5 text-[10px] font-bold text-gray-500 mb-1">
-                  {meta.icon}
-                  {meta.label}
-                </div>
-                <span className={`font-mono text-sm ${meta.color || 'text-gray-900'}`}>{meta.value}</span>
-              </div>
-            ))}
-            {dates.created && (
-              <div className="p-3 bg-[#faf8f5] rounded-xl border border-gray-100">
-                <div className="flex items-center gap-1.5 text-[10px] font-bold text-gray-500 mb-1">
-                  <Calendar className="w-3.5 h-3.5" />
-                  تاريخ الإنشاء
-                </div>
-                <span className="font-mono text-sm text-gray-900">{formatDate(dates.created)}</span>
-              </div>
-            )}
-            {dates.due && (
-              <div className="p-3 bg-[#faf8f5] rounded-xl border border-gray-100">
-                <div className="flex items-center gap-1.5 text-[10px] font-bold text-gray-500 mb-1">
-                  <Calendar className="w-3.5 h-3.5" />
-                  تاريخ الاستحقاق
-                </div>
-                <span className="font-mono text-sm text-gray-900">{formatDate(dates.due)}</span>
-              </div>
-            )}
-            {assignee && (
-              <div className="p-3 bg-[#faf8f5] rounded-xl border border-gray-100">
-                <div className="flex items-center gap-1.5 text-[10px] font-bold text-gray-500 mb-1">
-                  <User className="w-3.5 h-3.5" />
-                  المسؤول
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="w-7 h-7 rounded-full bg-[#2e5b9f]/10 flex items-center justify-center text-[#2e5b9f] font-bold text-sm">
-                    {assignee.avatar || assignee.name.charAt(0)}
-                  </div>
-                  <div>
-                    <span className="font-bold text-sm text-gray-900 block">{assignee.name}</span>
-                    {assignee.role && <span className="text-[10px] text-gray-500">{assignee.role}</span>}
-                  </div>
-                </div>
-              </div>
-            )}
+            <span
+              className={`inline-flex items-center gap-1 shrink-0 font-bold rounded-full border px-2 py-0.5 text-[10px] ${statusStyle.bg} ${statusStyle.text} ${statusStyle.border}`}
+            >
+              {statusStyle.icon}
+              <span className="capitalize">{status}</span>
+            </span>
           </div>
-        )}
 
-        {/* Tags */}
-        {tags.length > 0 && (
-          <div className="mb-4 flex flex-wrap gap-1.5">
-            {tags.map((tag, idx) => (
-              <span key={idx} className="inline-flex items-center px-2 py-1 rounded-full bg-gray-100 text-gray-700 text-xs font-bold">
-                {tag}
-              </span>
-            ))}
-          </div>
-        )}
+          {/* الصف الثاني: شرائح البيانات مقابل أزرار الإجراءات */}
+          {(metadata.length > 0 || tags.length > 0 || actions.length > 0) && (
+            <div className="flex items-center justify-between gap-2 mt-2.5 pt-2.5 border-t border-gray-100/80">
+              <div className="flex flex-wrap items-center gap-1.5 min-w-0">
+                {metadata.map((meta, idx) => (
+                  <span
+                    key={idx}
+                    className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-[#faf8f5] border border-gray-100 text-[10px] font-bold text-gray-500 max-w-full"
+                  >
+                    {meta.icon}
+                    <span>{meta.label}:</span>
+                    <span className={`font-mono truncate max-w-[140px] ${meta.color || 'text-gray-900'}`}>{meta.value}</span>
+                  </span>
+                ))}
+                {tags.map((tag, idx) => (
+                  <span key={`tag-${idx}`} className="inline-flex items-center px-2 py-1 rounded-full bg-blue-50 border border-blue-100 text-[10px] font-bold text-[#2e5b9f]">
+                    {tag}
+                  </span>
+                ))}
+              </div>
 
-        {/* Custom Children */}
-        {children && <div className="mb-4">{children}</div>}
+              {actions.length > 0 && (
+                <div className="flex flex-wrap items-center gap-1 shrink-0">
+                  {actions.map((action, idx) => (
+                    <button
+                      key={idx}
+                      onClick={(e) => handleActionClick(action, e)}
+                      disabled={action.disabled}
+                      className={`inline-flex items-center gap-1 font-bold transition shrink-0 px-2 py-1 rounded-md text-[10px] ${
+                        action.variant === 'primary' ? 'bg-[#2e5b9f] text-white hover:bg-[#244b85]' :
+                        action.variant === 'danger' ? 'bg-rose-50 text-rose-600 hover:bg-rose-100 border border-rose-200' :
+                        'bg-gray-50 text-gray-600 hover:bg-gray-100 border border-gray-200'
+                      } ${action.disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    >
+                      {action.icon}
+                      {action.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
-        {/* Footer with Dates and Quick Actions */}
-        <div className="pt-4 border-t border-gray-100 flex flex-col sm:flex-row items-center justify-between gap-3">
-          <div className="flex items-center gap-4 text-xs text-gray-500 font-mono flex-wrap">
-            {dates.created && (
-              <span className="flex items-center gap-1">
-                <Calendar className="w-3 h-3" />
-                {formatDate(dates.created)}
-              </span>
-            )}
-            {dates.updated && dates.updated !== dates.created && (
-              <span className="flex items-center gap-1">
-                <Clock className="w-3 h-3" />
-                تم التحديث: {formatDate(dates.updated)}
-              </span>
-            )}
-          </div>
-          
-          <div className="flex flex-wrap items-center gap-1.5 shrink-0">
-            {actions.map((action, idx) => (
-              <button
-                key={idx}
-                onClick={(e) => handleActionClick(action, e)}
-                disabled={action.disabled}
-                className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-bold transition shrink-0 ${
-                  action.variant === 'primary' ? 'bg-[#2e5b9f] text-white hover:bg-[#244b85]' :
-                  action.variant === 'danger' ? 'bg-rose-50 text-rose-600 hover:bg-rose-100 border border-rose-200' :
-                  'bg-gray-50 text-gray-600 hover:bg-gray-100 border border-gray-200'
-                } ${action.disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+          {/* Custom Children */}
+          {children && <div className="mt-2.5">{children}</div>}
+        </div>
+      ) : (
+        <div className="p-5 print:p-0">
+          {/* Header Row */}
+          <div className="flex items-start justify-between gap-2 mb-4">
+            <div className="flex items-center gap-2.5 flex-1 min-w-0">
+              <div
+                className={`flex items-center justify-center shrink-0 w-11 h-11 rounded-xl ${variantColor.bg} ${variantColor.text}`}
               >
-                {action.icon}
-                {action.label}
-              </button>
-            ))}
+                {variantIcon}
+              </div>
+              <div className="min-w-0">
+                <h3 className="font-bold text-gray-900 truncate text-base">{title}</h3>
+                {subtitle && (
+                  <p className="text-gray-500 truncate mt-0.5 text-xs">{subtitle}</p>
+                )}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              {/* Status Badge */}
+              <span
+                className={`inline-flex items-center gap-1 font-bold rounded-full border px-2.5 py-1 text-xs ${statusStyle.bg} ${statusStyle.text} ${statusStyle.border}`}
+              >
+                {statusStyle.icon}
+                <span className="ml-1 capitalize">{status}</span>
+              </span>
+            </div>
+          </div>
+
+          {/* Amounts */}
+          {amounts && (
+            <div className="flex items-center gap-3 flex-wrap mb-4">
+              {amounts.primary && (
+                <div className="flex items-center gap-1.5">
+                  <DollarSign className="w-4 h-4 text-emerald-600" />
+                  <span className="text-lg font-bold font-mono text-emerald-700">{formatCurrency(amounts.primary)}</span>
+                  {amounts.secondary && (
+                    <span className="text-[10px] text-gray-500 font-mono">({formatCurrency(amounts.secondary)})</span>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Metadata Grid */}
+          {(metadata.length > 0 || dates.created || dates.due || assignee) && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-4 text-right">
+              {metadata.map((meta, idx) => (
+                <div key={idx} className="p-3 bg-[#faf8f5] rounded-xl border border-gray-100">
+                  <div className="flex items-center gap-1.5 text-[10px] font-bold text-gray-500 mb-1">
+                    {meta.icon}
+                    {meta.label}
+                  </div>
+                  <span className={`font-mono text-sm ${meta.color || 'text-gray-900'}`}>{meta.value}</span>
+                </div>
+              ))}
+              {dates.created && (
+                <div className="p-3 bg-[#faf8f5] rounded-xl border border-gray-100">
+                  <div className="flex items-center gap-1.5 text-[10px] font-bold text-gray-500 mb-1">
+                    <Calendar className="w-3.5 h-3.5" />
+                    تاريخ الإنشاء
+                  </div>
+                  <span className="font-mono text-sm text-gray-900">{formatDate(dates.created)}</span>
+                </div>
+              )}
+              {dates.due && (
+                <div className="p-3 bg-[#faf8f5] rounded-xl border border-gray-100">
+                  <div className="flex items-center gap-1.5 text-[10px] font-bold text-gray-500 mb-1">
+                    <Calendar className="w-3.5 h-3.5" />
+                    تاريخ الاستحقاق
+                  </div>
+                  <span className="font-mono text-sm text-gray-900">{formatDate(dates.due)}</span>
+                </div>
+              )}
+              {assignee && (
+                <div className="p-3 bg-[#faf8f5] rounded-xl border border-gray-100">
+                  <div className="flex items-center gap-1.5 text-[10px] font-bold text-gray-500 mb-1">
+                    <User className="w-3.5 h-3.5" />
+                    المسؤول
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-7 h-7 rounded-full bg-[#2e5b9f]/10 flex items-center justify-center text-[#2e5b9f] font-bold text-sm">
+                      {assignee.avatar || assignee.name.charAt(0)}
+                    </div>
+                    <div>
+                      <span className="font-bold text-sm text-gray-900 block">{assignee.name}</span>
+                      {assignee.role && <span className="text-[10px] text-gray-500">{assignee.role}</span>}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Tags */}
+          {tags.length > 0 && (
+            <div className="mb-4 flex flex-wrap gap-1.5">
+              {tags.map((tag, idx) => (
+                <span key={idx} className="inline-flex items-center px-2 py-1 rounded-full bg-gray-100 text-gray-700 text-xs font-bold">
+                  {tag}
+                </span>
+              ))}
+            </div>
+          )}
+
+          {/* Custom Children */}
+          {children && <div className="mb-4">{children}</div>}
+
+          {/* Footer with Quick Actions */}
+          <div className="pt-4 border-t border-gray-100 flex items-center justify-end gap-2">
+            <div className="flex flex-wrap items-center gap-1 shrink-0">
+              {actions.map((action, idx) => (
+                <button
+                  key={idx}
+                  onClick={(e) => handleActionClick(action, e)}
+                  disabled={action.disabled}
+                  className={`inline-flex items-center gap-1 font-bold transition shrink-0 px-2.5 py-1.5 rounded-lg text-xs ${
+                    action.variant === 'primary' ? 'bg-[#2e5b9f] text-white hover:bg-[#244b85]' :
+                    action.variant === 'danger' ? 'bg-rose-50 text-rose-600 hover:bg-rose-100 border border-rose-200' :
+                    'bg-gray-50 text-gray-600 hover:bg-gray-100 border border-gray-200'
+                  } ${action.disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+                >
+                  {action.icon}
+                  {action.label}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
-      </div>
+      )}
     </article>
   );
 };
@@ -320,7 +400,7 @@ export const ProductCard: React.FC<Omit<ProfessionalCardProps, 'variant'>> = (pr
 );
 
 export const ExpenseCard: React.FC<Omit<ProfessionalCardProps, 'variant'>> = (props) => (
-  <ProfessionalCard {...props} variant="expense" />
+  <ProfessionalCard {...props} variant="expense" compact={props.compact ?? true} />
 );
 
 export const InventoryCard: React.FC<Omit<ProfessionalCardProps, 'variant'>> = (props) => (

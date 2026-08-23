@@ -99,7 +99,7 @@ export const CashierOrdersTrackerPage: React.FC = () => {
       if (searchMode === 'orderNumber') {
         // Specific search for order number
         const cleanQ = q.replace('#', '');
-        return matchesStatus && order.orderNumber.toLowerCase().includes(cleanQ);
+        return matchesStatus && String(order.orderNumber || '').toLowerCase().includes(cleanQ);
       }
 
       if (searchMode === 'table') {
@@ -113,20 +113,20 @@ export const CashierOrdersTrackerPage: React.FC = () => {
 
       if (searchMode === 'product') {
         // Specific search for product name inside items
-        const hasProd = order.items.some((it) => {
-          const name = typeof it.product === 'object' ? it.product.name : '';
-          return name.toLowerCase().includes(q);
+        const hasProd = (order.items || []).some((it) => {
+          const name = it && typeof it.product === 'object' && it.product ? (it.product as any).name : '';
+          return String(name || '').toLowerCase().includes(q);
         });
         return matchesStatus && hasProd;
       }
 
       // 'all' mode: matches any of the above
       const cleanQ = q.replace('#', '');
-      const matchesOrderNum = order.orderNumber.toLowerCase().includes(cleanQ);
+      const matchesOrderNum = String(order.orderNumber || '').toLowerCase().includes(cleanQ);
       const matchesTable = order.tableNumber && String(order.tableNumber).includes(cleanQ);
-      const matchesProd = order.items.some((it) => {
-        const name = typeof it.product === 'object' ? it.product.name : '';
-        return name.toLowerCase().includes(q);
+      const matchesProd = (order.items || []).some((it) => {
+        const name = it && typeof it.product === 'object' && it.product ? (it.product as any).name : '';
+        return String(name || '').toLowerCase().includes(q);
       });
 
       return matchesStatus && (matchesOrderNum || matchesTable || matchesProd);
@@ -162,11 +162,11 @@ export const CashierOrdersTrackerPage: React.FC = () => {
         ['التسلسل', 'رقم الفاتورة', 'الوقت', 'النوع / الطاولة', 'عدد الأصناف', 'المبلغ', 'الحالة'],
         ...filteredOrders.map((o, idx) => [
           `#${filteredOrders.length - idx}`,
-          `#${o.orderNumber}`,
+          `#${String(o.orderNumber || o._id || '').slice(-8)}`,
           formatTime(o.createdAt),
           o.orderType === 'dine-in' ? `طاولة #${o.tableNumber || 1}` : 'سفري',
-          `${o.items.length} أصناف`,
-          `${o.totalAmount} ج.م`,
+          `${(o.items || []).length} أصناف`,
+          `${o.totalAmount} جنيها`,
           o.status === 'completed' ? 'تم التسليم' : 'قيد التحضير',
         ]),
       ];
@@ -388,10 +388,15 @@ export const CashierOrdersTrackerPage: React.FC = () => {
             return (
               <div
                 key={order._id}
-                className={`bg-white rounded-3xl border transition p-4 shadow-2xs flex flex-col justify-between ${
+                onClick={() => handlePrintReceipt(order)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handlePrintReceipt(order); }}
+                title="اضغط في أي مكان لعرض وطباعة الفاتورة"
+                className={`bg-white rounded-3xl border transition p-4 shadow-2xs flex flex-col justify-between cursor-pointer hover:shadow-md hover:shadow-[#2e5b9f]/5 active:scale-[0.99] ${
                   isPending
                     ? 'border-amber-300 ring-2 ring-amber-300/20'
-                    : 'border-gray-200/80 hover:border-gray-300'
+                    : 'border-gray-200/80 hover:border-[#2e5b9f]/40'
                 }`}
               >
                 <div>
@@ -431,15 +436,15 @@ export const CashierOrdersTrackerPage: React.FC = () => {
                         : 'طلب سفري / تيك أواي 🛍️'}
                     </span>
                     <span className="text-xs text-gray-400 font-mono">
-                      {formatNumber(order.items.length)} أصناف
+                      {formatNumber((order.items || []).length)} أصناف
                     </span>
                   </div>
 
                   {/* Items List */}
                   <div className="space-y-2 py-2.5 border-y border-dashed border-gray-200 bg-[#faf8f5]/80 p-3 rounded-2xl">
-                    {order.items.map((item, itemIdx) => {
+                    {(order.items || []).map((item, itemIdx) => {
                       const name =
-                        typeof item.product === 'object' ? item.product.name : 'مشروب';
+                        item && typeof item.product === 'object' && item.product ? (item.product as any).name : 'مشروب';
                       return (
                         <div key={itemIdx} className="flex justify-between items-center text-xs" dir="rtl">
                           <div className="flex items-center gap-1.5 truncate">
@@ -468,7 +473,7 @@ export const CashierOrdersTrackerPage: React.FC = () => {
 
                   <div className="grid grid-cols-2 gap-2">
                     <button
-                      onClick={() => handlePrintReceipt(order)}
+                      onClick={(e) => { e.stopPropagation(); handlePrintReceipt(order); }}
                       className="inline-flex items-center justify-center gap-1 bg-white hover:bg-gray-50 text-gray-700 border border-gray-200 py-2.5 px-3 rounded-2xl text-xs font-bold transition shadow-2xs cursor-pointer"
                     >
                       <Printer className="w-3.5 h-3.5 text-gray-500" />
@@ -477,7 +482,7 @@ export const CashierOrdersTrackerPage: React.FC = () => {
 
                     {isPending ? (
                       <button
-                        onClick={() => handleUpdateStatus(order._id, 'completed')}
+                        onClick={(e) => { e.stopPropagation(); handleUpdateStatus(order._id, 'completed'); }}
                         className="inline-flex items-center justify-center gap-1 bg-emerald-600 hover:bg-emerald-700 text-white py-2.5 px-3 rounded-2xl text-xs font-bold transition shadow-2xs cursor-pointer"
                       >
                         <Check className="w-3.5 h-3.5" />
@@ -485,7 +490,7 @@ export const CashierOrdersTrackerPage: React.FC = () => {
                       </button>
                     ) : (
                       <button
-                        onClick={() => handleUpdateStatus(order._id, 'pending')}
+                        onClick={(e) => { e.stopPropagation(); handleUpdateStatus(order._id, 'pending'); }}
                         className="inline-flex items-center justify-center gap-1 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 py-2.5 px-3 rounded-2xl text-xs font-bold transition cursor-pointer"
                       >
                         <span>إعادة للتحضير ⏳</span>
@@ -541,7 +546,7 @@ export const CashierOrdersTrackerPage: React.FC = () => {
                       )}
                     </td>
                     <td className="py-3.5 px-3 text-gray-600">
-                      {order.items.map((it) => `${typeof it.product === 'object' ? it.product.name : 'صنف'} (×${it.quantity})`).join(', ')}
+                      {(order.items || []).map((it) => `${it && typeof it.product === 'object' && it.product ? (it.product as any).name : 'صنف'} (×${it.quantity})`).join(', ')}
                     </td>
                     <td className="py-3.5 px-3 font-bold font-mono text-[#2e5b9f] text-sm">
                       {formatPrice(order.totalAmount)}

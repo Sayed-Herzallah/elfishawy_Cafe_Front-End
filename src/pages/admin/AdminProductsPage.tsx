@@ -11,7 +11,8 @@ import { Select } from '../../components/ui/Select';
 import { Badge } from '../../components/ui/Badge';
 import { LoadingSkeleton } from '../../components/ui/LoadingSkeleton';
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
-import { FilterDialog } from '../../components/ui/FilterDialog';
+import { DateRangeFilter, toLocalDateString } from '../../components/ui/DateRangeFilter';
+import { DashboardFilterBar } from '../../components/ui/DashboardFilterBar';
 import {
   Plus,
   Search,
@@ -25,6 +26,8 @@ import {
   Calculator,
   Trash2 as TrashIcon,
   FlaskConical,
+  Info,
+  CheckCircle2,
 } from 'lucide-react';
 
 export const AdminProductsPage: React.FC = () => {
@@ -52,9 +55,6 @@ export const AdminProductsPage: React.FC = () => {
 
   // Delete Confirm
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
-  
-  // Filter Dialog
-  const [isFilterDialogOpen, setIsFilterDialogOpen] = useState(false);
 
   const [formData, setFormData] = useState({
     name: '',
@@ -173,70 +173,12 @@ export const AdminProductsPage: React.FC = () => {
     }
   }, [computedAvailable, recipeData]);
 
-  // Filter Dialog Config
-  const filterDialogConfig = {
-    title: 'تصفية المنتجات',
-    fields: [
-      {
-        name: 'search',
-        label: 'بحث',
-        type: 'input' as const,
-        placeholder: 'الاسم أو الوصف...',
-        defaultValue: searchQuery,
-      },
-      {
-        name: 'category',
-        label: 'التصنيف',
-        type: 'select' as const,
-        options: [
-          { value: 'all', label: 'الكل' },
-          ...categories.map((c) => ({ value: c._id, label: c.name })),
-        ],
-        defaultValue: activeCategory,
-      },
-      {
-        name: 'stockFilter',
-        label: 'حالة المخزون',
-        type: 'select' as const,
-        options: [
-          { value: 'all', label: 'الكل' },
-          { value: 'in', label: 'متوفر' },
-          { value: 'out', label: 'نافد' },
-        ],
-        defaultValue: stockFilter,
-      },
-      {
-        name: 'dateFrom',
-        label: 'من تاريخ',
-        type: 'date' as const,
-        defaultValue: dateFrom,
-      },
-      {
-        name: 'dateTo',
-        label: 'إلى تاريخ',
-        type: 'date' as const,
-        defaultValue: dateTo,
-      },
-    ],
-    activeFiltersCount: (searchQuery ? 1 : 0) + (activeCategory !== 'all' ? 1 : 0) + (stockFilter !== 'all' ? 1 : 0) + (dateFrom ? 1 : 0) + (dateTo ? 1 : 0),
-  };
-
-  const handleFilterApply = (values: any) => {
-    if (values.search !== undefined) setSearchQuery(values.search);
-    if (values.category !== undefined) setActiveCategory(values.category);
-    if (values.stockFilter !== undefined) setStockFilter(values.stockFilter);
-    if (values.dateFrom !== undefined) setDateFrom(values.dateFrom);
-    if (values.dateTo !== undefined) setDateTo(values.dateTo);
-    setIsFilterDialogOpen(false);
-  };
-
   const handleFilterReset = () => {
     setSearchQuery('');
     setActiveCategory('all');
     setStockFilter('all');
     setDateFrom('');
     setDateTo('');
-    setIsFilterDialogOpen(false);
   };
 
   const getProductImageUrl = (img: any): string => {
@@ -499,7 +441,19 @@ export const AdminProductsPage: React.FC = () => {
     if (stockFilter === 'in') matchesStock = p.stockQuantity > 0;
     if (stockFilter === 'out') matchesStock = p.stockQuantity <= 0;
 
-    return matchesCat && matchesSearch && matchesStock;
+    // ✅ نطاق التاريخ المخصص — على تاريخ إضافة / تحديث المنتج
+    let matchesDate = true;
+    if (dateFrom || dateTo) {
+      const pDate = new Date(p.createdAt || p.updatedAt || '');
+      if (!pDate || isNaN(pDate.getTime())) {
+        matchesDate = false;
+      } else {
+        if (dateFrom && pDate < new Date(`${dateFrom}T00:00:00`)) matchesDate = false;
+        if (dateTo && pDate > new Date(`${dateTo}T23:59:59.999`)) matchesDate = false;
+      }
+    }
+
+    return matchesCat && matchesSearch && matchesStock && matchesDate;
   });
 
   const inStockCount = products.filter((p) => p.stockQuantity > 0).length;
@@ -541,113 +495,75 @@ export const AdminProductsPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Filter and Search Bar */}
-      <div className="bg-white rounded-2xl border border-gray-200/80 p-4 shadow-2xs space-y-3">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-          {/* Search Box */}
-          <div className="relative flex-1">
-            <Search className="w-4 h-4 text-gray-400 absolute right-3.5 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              placeholder="ابحث باسم المنتج أو الوصف — مثال: كابتشينو، كرواسون"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full bg-[#faf8f5] hover:bg-white focus:bg-white border border-gray-200 rounded-xl pr-10 pl-3 py-2.5 text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-[#2e5b9f]/20 focus:border-[#2e5b9f]"
-            />
-          </div>
+      {/* ✨ شريط الفلترة الموحّد — بحث + حالة المخزون + منتقي تاريخ احترافي */}
+      <DashboardFilterBar
+        searchValue={searchQuery}
+        onSearchChange={setSearchQuery}
+        searchPlaceholder="ابحث باسم المنتج أو الوصف — مثال: كابتشينو، كرواسون"
+        groupLabel="الحالة:"
+        periods={[
+          { id: 'all', label: `الكل (${formatNumber(products.length)})` },
+          { id: 'in', label: `متوفر (${formatNumber(inStockCount)})` },
+          { id: 'out', label: `نافد (${formatNumber(outOfStockCount)})` },
+        ]}
+        activePeriod={stockFilter}
+        onPeriodChange={(id) => setStockFilter(id as typeof stockFilter)}
+        resultCount={filteredProducts.length}
+        resultLabel="منتج معروض"
+        activeCount={
+          (searchQuery ? 1 : 0) +
+          (activeCategory !== 'all' ? 1 : 0) +
+          (stockFilter !== 'all' ? 1 : 0) +
+          (dateFrom ? 1 : 0) +
+          (dateTo ? 1 : 0)
+        }
+        onReset={handleFilterReset}
+      >
+        <DateRangeFilter
+          value={{
+            from: dateFrom ? new Date(`${dateFrom}T00:00:00`) : null,
+            to: dateTo ? new Date(`${dateTo}T00:00:00`) : null,
+            preset: 'custom',
+          }}
+          onChange={(range) => {
+            setDateFrom(range.from ? toLocalDateString(range.from) : '');
+            setDateTo(range.to ? toLocalDateString(range.to) : '');
+          }}
+          showPresets
+          className="w-full sm:w-[260px]"
+        />
+      </DashboardFilterBar>
 
-          {/* Action Buttons */}
-          <div className="flex items-center gap-1.5 shrink-0">
-            <button
-              onClick={() => setIsFilterDialogOpen(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-2 border border-gray-200/60 rounded-xl text-xs font-bold text-gray-700 hover:bg-[#faf8f5] transition cursor-pointer"
-            >
-              <Filter className="w-3.5 h-3.5 text-[#2e5b9f]" />
-              تصفية متقدمة
-            </button>
-
-            {(activeCategory !== 'all' || stockFilter !== 'all' || dateFrom || dateTo) && (
-              <button
-                onClick={handleFilterReset}
-                className="flex items-center justify-center gap-1 py-2 px-3 border border-gray-200/60 rounded-xl text-xs font-bold text-rose-600 hover:bg-[#fff5f5] transition cursor-pointer"
-              >
-                مسح الفلاتر
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* Status Filter Pills */}
-        <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-gray-100">
-          <span className="text-[11px] font-bold text-gray-500 ml-1 flex items-center gap-1">
-            <Filter className="w-3.5 h-3.5 text-[#2e5b9f]" /> الحالة:
-          </span>
+      {/* Category Tabs */}
+      <div className="flex flex-wrap items-center gap-1.5 bg-white rounded-2xl border border-gray-200/80 p-3 shadow-2xs">
+        <button
+          onClick={() => setActiveCategory('all')}
+          className={`py-1.5 px-3 rounded-xl text-xs font-bold transition whitespace-nowrap ${
+            activeCategory === 'all'
+              ? 'bg-[#2e5b9f] text-white shadow-2xs'
+              : 'bg-gray-50 text-gray-600 border border-gray-200 hover:bg-gray-100'
+          }`}
+        >
+          الكل
+        </button>
+        {categories.map((cat) => (
           <button
-            onClick={() => setStockFilter('all')}
-            className={`py-1 px-3 rounded-xl text-xs font-bold transition whitespace-nowrap cursor-pointer ${
-              stockFilter === 'all'
-                ? 'bg-gray-900 text-white shadow-2xs'
-                : 'bg-gray-50 text-gray-600 border border-gray-200/60 hover:bg-gray-100'
-            }`}
-          >
-            الكل ({products.length})
-          </button>
-          <button
-            onClick={() => setStockFilter('in')}
-            className={`py-1 px-3 rounded-xl text-xs font-bold transition whitespace-nowrap cursor-pointer ${
-              stockFilter === 'in'
-                ? 'bg-emerald-600 text-white shadow-2xs'
-                : 'bg-gray-50 text-gray-600 border border-gray-200/60 hover:bg-gray-100'
-            }`}
-          >
-            متوفر ({inStockCount})
-          </button>
-          <button
-            onClick={() => setStockFilter('out')}
-            className={`py-1 px-3 rounded-xl text-xs font-bold transition whitespace-nowrap cursor-pointer ${
-              stockFilter === 'out'
-                ? 'bg-rose-600 text-white shadow-2xs'
-                : 'bg-gray-50 text-gray-600 border border-gray-200/60 hover:bg-gray-100'
-            }`}
-          >
-            نافد ({outOfStockCount})
-          </button>
-        </div>
-
-        {/* Category Tabs */}
-        <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t border-gray-100">
-          <button
-            onClick={() => setActiveCategory('all')}
+            key={cat._id}
+            onClick={() => setActiveCategory(cat._id)}
             className={`py-1.5 px-3 rounded-xl text-xs font-bold transition whitespace-nowrap ${
-              activeCategory === 'all'
+              activeCategory === cat._id
                 ? 'bg-[#2e5b9f] text-white shadow-2xs'
                 : 'bg-gray-50 text-gray-600 border border-gray-200 hover:bg-gray-100'
             }`}
           >
-            الكل
+            {cat.name}
           </button>
-          {categories.map((cat) => (
-            <button
-              key={cat._id}
-              onClick={() => setActiveCategory(cat._id)}
-              className={`py-1.5 px-3 rounded-xl text-xs font-bold transition whitespace-nowrap ${
-                activeCategory === cat._id
-                  ? 'bg-[#2e5b9f] text-white shadow-2xs'
-                  : 'bg-gray-50 text-gray-600 border border-gray-200 hover:bg-gray-100'
-              }`}
-            >
-              {cat.name}
-            </button>
-          ))}
-        </div>
+        ))}
       </div>
 
       {/* Products Table */}
       <div className="bg-white rounded-2xl border border-gray-200/80 p-6 shadow-2xs">
         <div className="flex items-center justify-between pb-4 mb-4 border-b border-gray-100">
-          <span className="text-xs text-gray-800 bg-gray-100/80 border border-gray-200 px-2.5 py-1 rounded-xl font-bold font-mono">
-            {filteredProducts.length} منتج معروض
-          </span>
           <h3 className="font-bold text-base text-gray-900">قائمة المنتجات</h3>
         </div>
 
@@ -968,7 +884,7 @@ export const AdminProductsPage: React.FC = () => {
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
         title={editingProduct ? 'تعديل المنتج' : 'إضافة منتج جديد'}
-        maxWidth="md"
+        maxWidth="2xl"
       >
         <form noValidate onSubmit={handleSubmit} className="space-y-4 text-right">
           <Input
@@ -986,7 +902,7 @@ export const AdminProductsPage: React.FC = () => {
 
           <div className="grid grid-cols-2 gap-3">
             <Input
-              label="السعر (ج.م) *"
+              label="السعر (جنيها) *"
               type="number"
               min="0"
               placeholder="185"
@@ -1040,13 +956,16 @@ export const AdminProductsPage: React.FC = () => {
           />
 
 {/* Recipe / Raw-material linking (auto stock calculation from inventory) */}
-          <div className="rounded-xl border border-[#2e5b9f]/30 bg-blue-50/60 p-4 text-right space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <FlaskConical className="w-4 h-4 text-[#2e5b9f]" />
-                <span className="text-xs font-bold text-[#2e5b9f]">
-                  ربط خامات المخزون (حساب الكمية تلقائياً)
+          <div className="rounded-2xl border border-[#2e5b9f]/25 bg-blue-50/40 p-4 text-right space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-[#2e5b9f]/15">
+              <div className="flex items-center gap-2.5">
+                <span className="w-9 h-9 rounded-xl bg-white border border-[#2e5b9f]/25 flex items-center justify-center shadow-2xs">
+                  <FlaskConical className="w-4 h-4 text-[#2e5b9f]" />
                 </span>
+                <div>
+                  <p className="text-xs font-bold text-gray-900">ربط خامات المخزون</p>
+                  <p className="text-[10px] text-gray-500">احسب الكمية المتاحة تلقائياً من أرصدة المخزن</p>
+                </div>
               </div>
               {(computedAvailable !== null || (recipeData?.availableProductQty !== undefined && recipeData?.availableProductQty !== null)) && (
                 <button
@@ -1058,17 +977,20 @@ export const AdminProductsPage: React.FC = () => {
                     setFormData((prev) => ({ ...prev, stockQuantity: String(qty) }));
                     if (formErrors.stockQuantity) setFormErrors({ ...formErrors, stockQuantity: undefined });
                   }}
-                  className="inline-flex items-center gap-1 text-[#2e5b9f] font-bold text-[11px] hover:underline cursor-pointer"
+                  className="inline-flex items-center gap-1 bg-[#2e5b9f] hover:bg-[#244b85] text-white font-bold text-[11px] py-1.5 px-3 rounded-xl transition cursor-pointer shadow-2xs"
                 >
                   <Calculator className="w-3.5 h-3.5" />
-                  <span>تطبيق الكمية المحسوبة ({recipeData?.availableProductQty !== undefined && recipeData?.availableProductQty !== null ? recipeData.availableProductQty : computedAvailable})</span>
+                  <span>تطبيق المحسوب ({recipeData?.availableProductQty !== undefined && recipeData?.availableProductQty !== null ? recipeData.availableProductQty : computedAvailable})</span>
                 </button>
               )}
             </div>
 
-            <p className="text-[11px] text-gray-500 leading-relaxed">
-              مثال: لو اخترت خامة "حليب" برصيد ٢٠ لتر وكان استهلاك الكوب ٠.٢ لتر، فستكون الكمية المتاحة ١٠٠ كوب.
-            </p>
+            {recipeRows.length > 0 && (
+              <p className="text-[11px] text-gray-500 leading-relaxed flex items-center gap-1.5">
+                <Info className="w-3 h-3 shrink-0" />
+                مثال: خامة "حليب" برصيد ٢٠ لتر واستهلاك ٠.٢ لتر للكوب ← الكمية المتاحة ١٠٠ كوب.
+              </p>
+            )}
 
             {recipeRows.map((row, idx) => {
               const selectedInv = inventoryItems.find((i) => i._id === row.inventoryItem);
@@ -1077,30 +999,31 @@ export const AdminProductsPage: React.FC = () => {
                   key={idx}
                   className="rounded-2xl border border-[#2e5b9f]/15 bg-white shadow-sm overflow-hidden"
                 >
-                  {/* Row Header */}
-                  <div className="flex items-center justify-between px-4 py-2 bg-gradient-to-l from-[#2e5b9f]/5 to-blue-50/30 border-b border-[#2e5b9f]/10">
+                  {/* Compact Row Header */}
+                  <div className="flex items-center justify-between px-3.5 py-2 bg-gradient-to-l from-[#2e5b9f]/5 to-blue-50/30 border-b border-[#2e5b9f]/10">
+                    <div className="flex items-center gap-1.5">
+                      {selectedInv && (
+                        <span className="text-[10px] font-mono bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-full font-bold">
+                          الرصيد: {formatNumber(selectedInv.quantity)} {selectedInv.unit}
+                        </span>
+                      )}
+                      <span className="text-[10px] font-bold text-[#2e5b9f] bg-[#2e5b9f]/10 px-2 py-0.5 rounded-full">
+                        خامة #{idx + 1}
+                      </span>
+                    </div>
                     <button
                       type="button"
                       onClick={() => removeRecipeRow(idx)}
-                      className="inline-flex items-center gap-1 text-rose-500 hover:text-rose-700 font-bold text-[11px] hover:bg-rose-50 px-2 py-1 rounded-lg transition cursor-pointer"
+                      title="إزالة الخامة"
+                      className="inline-flex items-center gap-1 text-rose-500 hover:text-white font-bold text-[11px] hover:bg-rose-500 px-2 py-1 rounded-lg transition cursor-pointer border border-rose-200"
                     >
                       <TrashIcon className="w-3 h-3" />
                       <span>إزالة</span>
                     </button>
-                    <div className="flex items-center gap-2">
-                      {selectedInv && (
-                        <span className="text-[10px] font-mono bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-full font-bold">
-                          رصيد: {selectedInv.quantity} {selectedInv.unit}
-                        </span>
-                      )}
-                      <span className="text-[11px] font-bold text-[#2e5b9f] bg-[#2e5b9f]/10 px-2.5 py-0.5 rounded-full">
-                        خامة #{idx + 1}
-                      </span>
-                    </div>
                   </div>
 
                   {/* Row Fields */}
-                  <div className="grid grid-cols-1 sm:grid-cols-[2fr_1fr_1.1fr] gap-3 p-4 items-end text-right">
+                  <div className="grid grid-cols-1 sm:grid-cols-[2fr_1fr_1.1fr] gap-2.5 p-3 items-end text-right">
                     {/* Inventory Item Select */}
                     <div className="flex flex-col gap-1.5">
                       <label className="text-xs font-bold text-gray-700">الخامة من المخزون</label>
@@ -1121,11 +1044,6 @@ export const AdminProductsPage: React.FC = () => {
                           <FlaskConical className="w-3.5 h-3.5 text-[#2e5b9f]/60" />
                         </div>
                       </div>
-                      {selectedInv && (
-                        <p className="text-[10px] text-gray-400 font-mono pr-1">
-                          الرصيد الحالي: <strong className="text-[#2e5b9f]">{selectedInv.quantity} {selectedInv.unit}</strong>
-                        </p>
-                      )}
                     </div>
 
                     {/* Consumption per unit */}
@@ -1213,15 +1131,35 @@ export const AdminProductsPage: React.FC = () => {
             <label className={`block text-xs font-semibold mb-1.5 ${formErrors.imageFile && isFormSubmitted ? 'text-rose-600 font-bold' : 'text-gray-700'}`}>
               صورة المنتج (JPG / PNG) *
             </label>
-            <input
-              type="file"
-              accept="image/*"
-              onChange={(e) => {
-                setFormData({ ...formData, imageFile: e.target.files ? e.target.files[0] : null });
-                if (formErrors.imageFile) setFormErrors({ ...formErrors, imageFile: undefined });
-              }}
-              className={`w-full text-xs text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-[#2e5b9f] hover:file:bg-blue-100 cursor-pointer p-2 rounded-xl border ${formErrors.imageFile && isFormSubmitted ? 'border-rose-500 bg-rose-50/30' : 'border-gray-100'}`}
-            />
+            {formData.imageFile ? (
+              <div className="flex items-center justify-between gap-3 p-3 bg-emerald-50/60 border border-emerald-200 rounded-xl">
+                <span className="text-xs font-bold text-emerald-800 truncate flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  {formData.imageFile.name}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setFormData({ ...formData, imageFile: null })}
+                  className="text-xs font-bold text-rose-500 hover:text-rose-700 shrink-0 cursor-pointer"
+                >
+                  إزالة
+                </button>
+              </div>
+            ) : (
+              <label className={`flex items-center justify-center gap-2 border border-dashed rounded-xl py-4 px-3 text-xs font-bold transition cursor-pointer hover:bg-blue-50/60 ${formErrors.imageFile && isFormSubmitted ? 'border-rose-400 bg-rose-50/30 text-rose-600' : 'border-gray-300 text-gray-500'}`}>
+                <Plus className="w-4 h-4" />
+                اضغط لاختيار صورة المنتج
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    setFormData({ ...formData, imageFile: e.target.files ? e.target.files[0] : null });
+                    if (formErrors.imageFile) setFormErrors({ ...formErrors, imageFile: undefined });
+                  }}
+                />
+              </label>
+            )}
             {formErrors.imageFile && isFormSubmitted && (
               <p className="text-[11px] text-rose-600 font-bold mt-1">⚠️ {formErrors.imageFile}</p>
             )}
@@ -1315,15 +1253,6 @@ export const AdminProductsPage: React.FC = () => {
         variant="danger"
         onConfirm={handleDeleteProduct}
         onCancel={() => setDeleteTarget(null)}
-      />
-
-      {/* Filter Dialog */}
-      <FilterDialog
-        isOpen={isFilterDialogOpen}
-        onClose={() => setIsFilterDialogOpen(false)}
-        config={filterDialogConfig}
-        onApply={handleFilterApply}
-        onReset={handleFilterReset}
       />
     </div>
   );

@@ -26,42 +26,50 @@ import { AdminSettingsPage } from '../pages/admin/AdminSettingsPage';
 import { NotFoundPage } from '../pages/NotFoundPage';
 import { ProtectedRoute } from './ProtectedRoute';
 import { RoleGuard } from './RoleGuard';
+import { ErrorBoundary } from '../components/ui/ErrorBoundary';
+
+// غلاف آمن لكل صفحة: أي خطأ Runtime يظهر كرسالة واضحة بدل الصفحة البيضاء
+const SafePage: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <ErrorBoundary>
+    {children}
+  </ErrorBoundary>
+);
 
 export const AppRoutes: React.FC = () => {
   return (
     <Routes>
       {/* Public Pages */}
       <Route element={<PublicLayout />}>
-        <Route path="/" element={<LandingPage />} />
-        <Route path="/menu" element={<PublicMenuPage />} />
-        <Route path="/survey" element={<SurveyPage />} />
-        <Route path="/developers" element={<AboutDevelopersPage />} />
+        <Route path="/" element={<SafePage><LandingPage /></SafePage>} />
+        <Route path="/menu" element={<SafePage><PublicMenuPage /></SafePage>} />
+        <Route path="/survey" element={<SafePage><SurveyPage /></SafePage>} />
+        <Route path="/developers" element={<SafePage><AboutDevelopersPage /></SafePage>} />
       </Route>
 
       {/* Auth */}
-      <Route path="/login" element={<LoginPage />} />
+      <Route path="/login" element={<SafePage><LoginPage /></SafePage>} />
 
       {/* Protected Routes */}
       <Route element={<ProtectedRoute />}>
         {/* POS & Cashier Portal (Accessible by both Cashiers and Admins) */}
         <Route path="/pos" element={<CashierLayout />}>
-          <Route index element={<CashierPOSPage />} />
-          <Route path="orders" element={<CashierOrdersTrackerPage />} />
-          <Route path="inventory" element={<CashierInventoryPage />} />
-          <Route path="expenses" element={<CashierExpensesPage />} />
+          <Route index element={<SafePage><CashierPOSPage /></SafePage>} />
+          <Route path="orders" element={<SafePage><CashierOrdersTrackerPage /></SafePage>} />
+          <Route path="inventory" element={<SafePage><CashierInventoryPage /></SafePage>} />
+          <Route path="expenses" element={<SafePage><CashierExpensesPage /></SafePage>} />
         </Route>
 
-        {/* Admin Portal (Admin & Cashier) */}
-        <Route element={<RoleGuard allowedRoles={['admin', 'cashier']} />}>
+        {/* Admin Portal — للأدمن فقط (الكاشير يُحوَّل تلقائياً إلى /pos) */}
+        <Route element={<RoleGuard allowedRoles={['admin']} />}>
           <Route path="/admin" element={<AdminLayout />}>
-            <Route index element={<AdminDashboardPage />} />
-            <Route path="products" element={<AdminProductsPage />} />
-            <Route path="categories" element={<AdminCategoriesPage />} />
-            <Route path="inventory" element={<AdminInventoryPage />} />
-            <Route path="sales" element={<AdminSalesPage />} />
-            <Route path="expenses" element={<AdminExpensesPage />} />
-            <Route path="reports" element={<AdminReportsPage />} />
-            <Route path="settings" element={<AdminSettingsPage />} />
+            <Route index element={<SafePage><AdminDashboardPage /></SafePage>} />
+            <Route path="products" element={<SafePage><AdminProductsPage /></SafePage>} />
+            <Route path="categories" element={<SafePage><AdminCategoriesPage /></SafePage>} />
+            <Route path="inventory" element={<SafePage><AdminInventoryPage /></SafePage>} />
+            <Route path="sales" element={<SafePage><AdminSalesPage /></SafePage>} />
+            <Route path="expenses" element={<SafePage><AdminExpensesPage /></SafePage>} />
+            <Route path="reports" element={<SafePage><AdminReportsPage /></SafePage>} />
+            <Route path="settings" element={<SafePage><AdminSettingsPage /></SafePage>} />
           </Route>
         </Route>
       </Route>

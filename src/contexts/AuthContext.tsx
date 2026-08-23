@@ -11,7 +11,7 @@ interface AuthContextValue {
   isAdmin: boolean;
   isCashier: boolean;
   isLoading: boolean;
-  login: (email: string, password: string) => Promise<boolean>;
+  login: (email: string, password: string) => Promise<User | null>;
   logout: () => void;
   refreshUserProfile: () => Promise<void>;
   updateProfile: (data: { userName?: string; phone?: string; address?: string }) => Promise<boolean>;
@@ -68,24 +68,36 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return () => window.removeEventListener('auth:unauthorized', handleUnauthorized);
   }, [loadCurrentUser, showToast]);
 
-  const login = async (email: string, password: string): Promise<boolean> => {
+  const login = async (email: string, password: string): Promise<User | null> => {
     try {
       setIsLoading(true);
       const res = await authService.login(email, password);
       if (res.success && res.tokens) {
         ApiClient.setTokens(res.tokens.accessToken, res.tokens.refreshToken);
+        let loggedInUser: User | null = null;
         if (res.data) {
+          loggedInUser = res.data;
           setUser(res.data);
         } else {
-          await loadCurrentUser();
+          // ✅ الـ Backend أعاد التوكنز فقط — نجلب بيانات المستخدم ونرجّعها
+          // (كانت العيب هنا: كنا بنجلب البيانات لكن بنرجع null فيظهر خطأ الدخول رغم نجاحه)
+          try {
+            const me = await userService.getMe();
+            if (me.success && me.data) {
+              loggedInUser = me.data;
+              setUser(me.data);
+            }
+          } catch {
+            // تجاهل — loadCurrentUser في الـ effect سيتكفل بالمزامنة
+          }
         }
         showToast('تم تسجيل الدخول بنجاح');
-        return true;
+        return loggedInUser;
       }
-      return false;
+      return null;
     } catch (err: any) {
       showError(err);
-      return false;
+      return null;
     } finally {
       setIsLoading(false);
     }

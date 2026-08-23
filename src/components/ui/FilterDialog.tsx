@@ -1,6 +1,7 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Modal } from './Modal';
 import { Button } from './Button';
+import { DateRangeFilter, DateRange } from './DateRangeFilter';
 import { X, Calendar, ChevronLeft, ChevronRight, ChevronDown, SlidersHorizontal } from 'lucide-react';
 
 interface FilterOption {
@@ -38,6 +39,14 @@ const inputClasses =
 const labelClasses =
   'block text-xs font-bold text-gray-700 mb-1.5 select-none';
 
+// ✅ تحويل محلي صحيح YYYY-MM-DD — toISOString كان بيرجّع التاريخ يوم للخلف بتوقيت مصر
+function toLocalISO(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
 // Date Range Picker Component
 const DateRangePicker: React.FC<{
   name: string;
@@ -46,23 +55,10 @@ const DateRangePicker: React.FC<{
   onChange: (name: string, value: any) => void;
   placeholder?: string;
 }> = ({ name, label, value, onChange, placeholder }) => {
-  const [isOpen, setIsOpen] = useState(false);
   const [viewMonth, setViewMonth] = useState(() => {
     const d = value.from ? new Date(value.from) : new Date();
     return new Date(d.getFullYear(), d.getMonth(), 1);
   });
-  const inputRef = useRef<HTMLDivElement>(null);
-  const [focusedInput, setFocusedInput] = useState<'from' | 'to' | null>(null);
-
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (inputRef.current && !inputRef.current.contains(e.target as Node)) {
-        setIsOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
 
   const daysInMonth = (date: Date) => new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
   const firstDayOfMonth = (date: Date) => new Date(date.getFullYear(), date.getMonth(), 1).getDay(); // 0 = Sunday
@@ -85,16 +81,14 @@ const DateRangePicker: React.FC<{
     if (date > today) return;
     
     if (!value.from || (value.from && value.to)) {
-      onChange(`${name}_from`, date.toISOString().split('T')[0]);
+      onChange(`${name}_from`, toLocalISO(date));
       onChange(`${name}_to`, '');
-      setFocusedInput('to');
     } else {
-      const fromDate = new Date(value.from);
+      const fromDate = new Date(`${value.from}T00:00:00`);
       if (date < fromDate) {
-        onChange(`${name}_from`, date.toISOString().split('T')[0]);
+        onChange(`${name}_from`, toLocalISO(date));
       } else {
-        onChange(`${name}_to`, date.toISOString().split('T')[0]);
-        setIsOpen(false);
+        onChange(`${name}_to`, toLocalISO(date));
       }
     }
   };
@@ -114,8 +108,8 @@ const DateRangePicker: React.FC<{
       from = new Date(now.getFullYear(), now.getMonth(), 1); to = new Date(now);
     }
     setViewMonth(new Date(from.getFullYear(), from.getMonth(), 1));
-    onChange(`${name}_from`, from.toISOString().split('T')[0]);
-    onChange(`${name}_to`, to.toISOString().split('T')[0]);
+    onChange(`${name}_from`, toLocalISO(from));
+    onChange(`${name}_to`, toLocalISO(to));
   };
 
   const monthNames = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
@@ -127,26 +121,27 @@ const DateRangePicker: React.FC<{
   ];
 
   return (
-    <div className="relative" ref={inputRef}>
+    <div>
       <label className={`${labelClasses} flex items-center justify-start gap-1`}>
         <Calendar className="w-3.5 h-3.5 text-[#2e5b9f]" />
         {label}
       </label>
 
-      {/* Quick presets */}
+      {/* Quick presets — اختيار فوري بدون أي سكرول */}
       <div className="flex flex-wrap items-center gap-1 mb-2">
         {quickPresets.map((p) => (
           <button
             key={p.id}
             type="button"
             onClick={() => applyPreset(p.id)}
-            className="px-2 py-1 rounded-lg bg-gray-50 border border-gray-200/70 text-[10px] font-bold text-gray-600 hover:bg-[#2e5b9f]/5 hover:text-[#2e5b9f] hover:border-[#2e5b9f]/30 transition cursor-pointer"
+            className="px-2.5 py-1 rounded-lg bg-gray-50 border border-gray-200/70 text-[11px] font-bold text-gray-600 hover:bg-[#2e5b9f]/5 hover:text-[#2e5b9f] hover:border-[#2e5b9f]/30 transition cursor-pointer"
           >
             {p.label}
           </button>
         ))}
       </div>
       
+      {/* ملخص النطاق المختار */}
       <div className="grid grid-cols-2 gap-2">
         <div className="relative">
           <input
@@ -154,8 +149,7 @@ const DateRangePicker: React.FC<{
             readOnly
             placeholder={placeholder || 'من تاريخ'}
             value={value.from ? formatDate(value.from) : ''}
-            onClick={() => { setFocusedInput('from'); setIsOpen(true); }}
-            className={`${inputClasses} cursor-pointer pl-8`}
+            className={`${inputClasses} pl-8`}
           />
           <Calendar className="w-3.5 h-3.5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
         </div>
@@ -165,18 +159,15 @@ const DateRangePicker: React.FC<{
             readOnly
             placeholder={placeholder || 'إلى تاريخ'}
             value={value.to ? formatDate(value.to) : ''}
-            onClick={() => { setFocusedInput('to'); setIsOpen(true); }}
-            className={`${inputClasses} cursor-pointer pl-8`}
+            className={`${inputClasses} pl-8`}
           />
           <Calendar className="w-3.5 h-3.5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
         </div>
       </div>
 
-      {isOpen && (
-        <>
-          <div className="fixed inset-0 z-40" onClick={() => setIsOpen(false)} />
-          <div className="absolute top-full right-0 z-50 mt-2 bg-white border border-gray-200 rounded-2xl shadow-xl shadow-gray-300/30 p-4 w-[320px] animate-in fade-in slide-in-from-top-2">
-            <div className="flex items-center justify-between mb-3 bg-gray-50 border border-gray-100 rounded-xl py-1.5 px-2">
+      {/* ✅ تقويم مدمج ظاهر دائماً — بدل القائمة المنسدلة اللي كانت بتتقص جوه السكرول وتضطر تعمل تمرير */}
+      <div className="mt-2 bg-[#faf8f5]/60 border border-gray-200/70 rounded-2xl p-3 w-full">
+            <div className="flex items-center justify-between mb-3 bg-white border border-gray-100 rounded-xl py-1.5 px-2">
               <button
                 type="button"
                 onClick={() => setViewMonth(new Date(viewMonth.getFullYear(), viewMonth.getMonth() - 1, 1))}
@@ -220,34 +211,58 @@ const DateRangePicker: React.FC<{
               })}
             </div>
 
-            <div className="flex items-center justify-between mt-3 pt-3 border-t border-gray-100">
-              <span className="text-[10px] text-gray-400 font-mono truncate">
+        <div className="flex items-center justify-between mt-3 pt-3 border-t border-gray-100">
+              <span className="text-[11px] text-gray-500 font-mono truncate">
                 {value.from ? formatDate(value.from) : '—'} ← {value.to ? formatDate(value.to) : '—'}
               </span>
               <button
                 type="button"
                 onClick={() => { onChange(`${name}_from`, ''); onChange(`${name}_to`, ''); }}
-                className="text-[10px] font-bold text-rose-500 hover:text-rose-600 transition cursor-pointer shrink-0 mr-2"
+                className="text-[11px] font-bold text-rose-500 hover:text-rose-600 transition cursor-pointer shrink-0 mr-2"
               >
                 مسح التواريخ
               </button>
             </div>
-          </div>
-        </>
-      )}
+      </div>
     </div>
   );
 };
 
 function formatDate(dateStr: string) {
-  const d = new Date(dateStr);
-  return d.toLocaleDateString('ar-EG', {
-    weekday: 'short',
-    year: 'numeric',
-    month: 'short',
+  const d = new Date(`${dateStr}T00:00:00`);
+  if (isNaN(d.getTime())) return '';
+  // تنسيق موحّد بأرقام لاتينية واضحة: 23 مايو 2026
+  return d.toLocaleDateString('ar-EG-u-nu-latn', {
     day: 'numeric',
-  }).replace(/[٠-٩]/g, (d) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d).toString());
+    month: 'short',
+    year: 'numeric',
+  });
 }
+
+// مكوّن جسر: يحوّل حقول النص (YYYY-MM-DD) لمكوّن DateRangeFilter الاحترافي
+// (زر + قائمة منبثقة مثبّتة تنقلب لأعلى تلقائياً = ليس هناك حاجة للسكرول لرؤية التاريخ)
+const CompactDateRangePicker: React.FC<{
+  name: string;
+  label: string;
+  value: { from?: string; to?: string };
+  onChange: (name: string, value: any) => void;
+}> = ({ name, label, value, onChange }) => {
+  const from = value.from ? new Date(`${value.from}T00:00:00`) : null;
+  const to = value.to ? new Date(`${value.to}T00:00:00`) : null;
+  const range: DateRange = { from, to, preset: from ? 'custom' : 'custom' };
+
+  const handleChange = (r: DateRange) => {
+    onChange(`${name}_from`, r.from ? toLocalISO(r.from) : '');
+    onChange(`${name}_to`, r.to ? toLocalISO(r.to) : '');
+  };
+
+  return (
+    <div>
+      <label className={labelClasses}>{label}</label>
+      <DateRangeFilter value={range} onChange={handleChange} showPresets />
+    </div>
+  );
+};
 
 export const FilterDialog: React.FC<FilterDialogProps> = ({
   config,
@@ -291,12 +306,11 @@ export const FilterDialog: React.FC<FilterDialogProps> = ({
         if (field.isDateRange) {
           return (
             <div key={field.name} className="sm:col-span-2">
-              <DateRangePicker
+              <CompactDateRangePicker
                 name={field.name}
                 label={field.label}
                 value={{ from: values[`${field.name}_from`], to: values[`${field.name}_to`] }}
                 onChange={handleFieldChange}
-                placeholder={field.placeholder}
               />
             </div>
           );
@@ -356,7 +370,7 @@ export const FilterDialog: React.FC<FilterDialogProps> = ({
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={config.title} maxWidth="md">
+    <Modal isOpen={isOpen} onClose={onClose} title={config.title} maxWidth="lg">
       <div className="text-right">
         {/* Dialog header strip */}
         <div className="flex items-center justify-between mb-4 pb-3 border-b border-gray-100">
@@ -372,7 +386,7 @@ export const FilterDialog: React.FC<FilterDialogProps> = ({
           )}
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3 max-h-[55vh] overflow-y-auto pl-1 pr-0.5 py-0.5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3.5 max-h-[62vh] overflow-y-auto pl-1 pr-0.5 py-0.5 scroll-smooth">
           {config.fields.map((field) => renderField(field))}
         </div>
 
