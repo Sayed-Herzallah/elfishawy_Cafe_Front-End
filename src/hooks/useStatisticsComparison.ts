@@ -120,7 +120,8 @@ export function useStatisticsComparison<
   );
 
   const changeAbsolute = current - previous;
-  const changePercent = previous === 0 ? (current > 0 ? 100 : 0) : Math.round((changeAbsolute / previous) * 100);
+  // ✅ القسمة على القيمة المطلقة للفترة السابقة — عشان الخسارة السابقة (بالسالب) ما تقلبش إشارة النسبة
+  const changePercent = previous === 0 ? (current > 0 ? 100 : 0) : Math.round((changeAbsolute / Math.abs(previous)) * 100);
 
   return {
     current,
@@ -254,7 +255,8 @@ export function useProfitComparison(
   const current = currentSales - currentExpenses;
   const previous = previousSales - previousExpenses;
   const changeAbsolute = current - previous;
-  const changePercent = previous === 0 ? (current > 0 ? 100 : 0) : Math.round((changeAbsolute / previous) * 100);
+  // ✅ القسمة على القيمة المطلقة — لو الفترة السابقة كانت خسارة النسبة تطلع باتجاهها الصحيح
+  const changePercent = previous === 0 ? (current > 0 ? 100 : 0) : Math.round((changeAbsolute / Math.abs(previous)) * 100);
 
   return {
     current,
@@ -264,5 +266,52 @@ export function useProfitComparison(
     trend: changePercent > 0 ? 'up' : changePercent < 0 ? 'down' : 'neutral',
     previousPeriodLabel: bounds.previousLabel,
     currentPeriodLabel: bounds.currentLabel,
+  };
+}
+
+/**
+ * مقارنة على نطاق تاريخ صريح (من منتقي التاريخ المخصص):
+ * الفترة الحالية = [from, to] — والفترة السابقة = نافذة بنفس الطول قبلها مباشرة.
+ */
+export function useExplicitRangeComparison<
+  T extends { createdAt?: string; date?: string }
+>(
+  data: T[],
+  valueExtractor: (item: T) => number,
+  from: Date,
+  to: Date
+): ComparisonResult {
+  const bounds = useMemo(() => {
+    const now = new Date();
+    const effectiveTo = to.getTime() > now.getTime() ? now : to;
+    const oneDayMs = 24 * 60 * 60 * 1000;
+    const rangeMs = Math.max(effectiveTo.getTime() - from.getTime(), oneDayMs);
+    const prevEnd = new Date(from.getTime() - 1);
+    const prevStart = new Date(prevEnd.getTime() - rangeMs);
+    return { from, to: effectiveTo, prevStart, prevEnd };
+  }, [from.getTime(), to.getTime()]);
+
+  const sumBetween = (start: Date, end: Date) =>
+    data
+      .filter((item) => {
+        const d = new Date(item.date || item.createdAt || '');
+        return d >= start && d <= end;
+      })
+      .reduce((sum, item) => sum + valueExtractor(item), 0);
+
+  const current = sumBetween(bounds.from, bounds.to);
+  const previous = sumBetween(bounds.prevStart, bounds.prevEnd);
+
+  const changeAbsolute = current - previous;
+  const changePercent = previous === 0 ? (current > 0 ? 100 : 0) : Math.round((changeAbsolute / Math.abs(previous)) * 100);
+
+  return {
+    current,
+    previous,
+    changePercent,
+    changeAbsolute,
+    trend: changePercent > 0 ? 'up' : changePercent < 0 ? 'down' : 'neutral',
+    previousPeriodLabel: 'الفترة السابقة',
+    currentPeriodLabel: 'الفترة المحددة',
   };
 }

@@ -23,7 +23,9 @@ import {
 import {
   useSalesComparison,
   useOrdersCountComparison,
-  useProfitComparison
+  useProfitComparison,
+  useExplicitRangeComparison,
+  type ComparisonResult
 } from '../../hooks/useStatisticsComparison';
 import {
   TrendingUp,
@@ -51,6 +53,7 @@ export const AdminDashboardPage: React.FC = () => {
   const [allOrders, setAllOrders] = useState<Order[]>([]);
   const [recentOrders, setRecentOrders] = useState<Order[]>([]);
   const [lowStockItems, setLowStockItems] = useState<InventoryItem[]>([]);
+  const [allInventory, setAllInventory] = useState<InventoryItem[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [allProducts, setAllProducts] = useState<Product[]>([]);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
@@ -70,7 +73,7 @@ export const AdminDashboardPage: React.FC = () => {
         analyticsService.getStats(),
         analyticsService.getCharts(),
         orderService.getOrders(),
-        inventoryService.listInventory({ lowStock: true }),
+        inventoryService.listInventory(),
         expenseService.listExpenses(),
         productService.listProducts().catch(() => null),
       ]);
@@ -81,7 +84,11 @@ export const AdminDashboardPage: React.FC = () => {
         setAllOrders(ordersRes.data);
         setRecentOrders(ordersRes.data.slice(0, 6));
       }
-      if (invRes.success && invRes.data) setLowStockItems(invRes.data);
+      if (invRes.success && invRes.data) {
+        // ✅ القائمة الكاملة لحساب قيمة المخزون + اشتقاق النواقص منها
+        setAllInventory(invRes.data);
+        setLowStockItems(invRes.data.filter((i) => i.quantity <= i.minLimit));
+      }
       if (expRes.success && expRes.data) setExpenses(expRes.data);
       if (prodRes?.success && prodRes.data) setAllProducts(prodRes.data);
     } catch (err) {
@@ -112,6 +119,10 @@ export const AdminDashboardPage: React.FC = () => {
 
   // Note: no early return here — useMemo below must not be called conditionally (Rules of Hooks)
 
+  // ✅ النطاق المخصص من منتقي التاريخ له الأولوية — وساعتها نطاق الأزرار السريعة يتجاهل تماماً
+  // (بدل ما كان الفلترين بيتصافوا والنتيجة بتطلع أصفار)
+  const hasCustomRange = Boolean(dateRange.from || dateRange.to);
+
   // Filter orders by time range (+ نطاق تاريخ مخصص من الفلتر إن وجد)
   const filteredOrders = allOrders.filter((o) => {
     const orderDate = new Date(o.createdAt);
@@ -128,6 +139,9 @@ export const AdminDashboardPage: React.FC = () => {
       to.setHours(23, 59, 59, 999);
       if (orderDate > to) return false;
     }
+
+    // ✅ الفلتر المخصص شغال؟ يبقى متقيدش بنطاق الأزرار السريعة
+    if (hasCustomRange) return true;
 
     if (timeRange === 'today') {
       return orderDate.toDateString() === now.toDateString();
@@ -166,6 +180,9 @@ export const AdminDashboardPage: React.FC = () => {
         if (expDate > to) return false;
       }
 
+      // ✅ الفلتر المخصص شغال؟ يبقى متقيدش بنطاق الأزرار السريعة
+      if (hasCustomRange) return true;
+
       if (timeRange === 'today') {
         return expDate.toDateString() === now.toDateString();
       } else if (timeRange === 'week') {
@@ -191,6 +208,12 @@ export const AdminDashboardPage: React.FC = () => {
   const ordersCount = filteredOrders.length;
   // ✅ صافي الربح الحقيقي — السالب يعني خسارة (المصروفات أكبر من المبيعات)
   const netProfit = totalSales - totalExpenses;
+
+  // 💰 قيمة المخزون الحالية = Σ (الكمية × سعر تكلفة الوحدة)
+  const inventoryValue = allInventory.reduce(
+    (sum, i) => sum + (Number(i.quantity) || 0) * (Number(i.costPrice) || 0),
+    0
+  );
 
   // Dynamic comparison with previous period
   const now = new Date();
@@ -251,9 +274,48 @@ export const AdminDashboardPage: React.FC = () => {
   const ordersChange = getChangePct(ordersCount, prevOrdersCount);
 
   // Use new comparison hooks for dynamic period comparisons
-  const salesComparison = useSalesComparison(timeRange, allOrders);
-  const ordersComparison = useOrdersCountComparison(timeRange, allOrders);
-  const profitComparison = useProfitComparison(timeRange, allOrders, expenses);
+  // 1) مقارنات النطاق السريع (اليوم / الأسبوع / الشهر / العام)
+  const quickSales = useSalesComparison(timeRange, allOrders);
+  const quickOrders = useOrdersCountComparison(timeRange, allOrders);
+  const quickProfit = useProfitComparison(timeRange, allOrders, expenses);
+
+  // 2) ✅ مقارنات نطاق منتقي التاريخ المخصص — الفلتر بقى يجيب إحصائيات فعلاً
+  const customFrom = useMemo(() => {
+    const d = dateRange.from ? new Date(dateRange.from) : new Date(0);
+    d.setHours(0, 0, 0, 0);
+    return d;
+  }, [dateRange.from]);
+  const customTo = useMemo(() => {
+    const d = dateRange.to ? new Date(dateRange.to) : new Date();
+    d.setHours(23, 59, 59, 999);
+    return d;
+  }, [dateRange.to]);
+
+  const customSales = useExplicitRangeComparison(allOrders, (o: Order) => (o.status === 'completed' ? o.totalAmount : 0), customFrom, customTo);
+  const customOrders = useExplicitRangeComparison(allOrders, () => 1, customFrom, customTo);
+  const customExpensesAll = useExplicitRangeComparison(expenses, (e: Expense) => e.amount, customFrom, customTo);
+  const customOperating = useExplicitRangeComparison(expenses, (e: Expense) => (e.category !== 'inventory' ? e.amount : 0), customFrom, customTo);
+
+  const customProfit: ComparisonResult = useMemo(() => {
+    const current = customSales.current - customExpensesAll.current;
+    const previous = customSales.previous - customExpensesAll.previous;
+    const changeAbsolute = current - previous;
+    const changePercent = previous === 0 ? (current > 0 ? 100 : 0) : Math.round((changeAbsolute / Math.abs(previous)) * 100);
+    return {
+      current,
+      previous,
+      changeAbsolute,
+      changePercent,
+      trend: changePercent > 0 ? 'up' : changePercent < 0 ? 'down' : 'neutral',
+      currentPeriodLabel: 'الفترة المحددة',
+      previousPeriodLabel: 'الفترة السابقة',
+    };
+  }, [customSales, customExpensesAll]);
+
+  // الاختيار النهائي: منتقي التاريخ المخصص له الأولوية على الأزرار السريعة
+  const salesComparison = hasCustomRange ? customSales : quickSales;
+  const ordersComparison = hasCustomRange ? customOrders : quickOrders;
+  const profitComparison = hasCustomRange ? customProfit : quickProfit;
 
   // Generate multi-series Chart Data points for AttaGlowingChart
   const chartDataPoints: ChartDataPoint[] = useMemo(() => {
@@ -432,17 +494,27 @@ export const AdminDashboardPage: React.FC = () => {
   });
   const dormantProducts = allProducts.filter((p) => !soldProductIds.has(p._id));
 
-  // مقارنة المصروفات التشغيلية بالفترة السابقة (بدون مشتريات المخزن)
+  // مقارنة المصروفات التشغيلية بالفترة السابقة (بدون مشتريات المخزن) — تتبع النطاق المخصص أيضاً
   const operatingChange = getChangePct(totalOperating, prevOperating);
-  const operatingComparison = {
-    current: totalOperating,
-    previous: prevOperating,
-    changePercent: operatingChange,
-    changeAbsolute: totalOperating - prevOperating,
-    trend: (totalOperating > prevOperating ? 'up' : totalOperating < prevOperating ? 'down' : 'neutral') as 'up' | 'down' | 'neutral',
-    currentPeriodLabel: 'الفترة الحالية',
-    previousPeriodLabel: prevPeriodLabel,
-  };
+  const operatingComparison: ComparisonResult = hasCustomRange
+    ? {
+        current: customOperating.current,
+        previous: customOperating.previous,
+        changePercent: customOperating.changePercent,
+        changeAbsolute: customOperating.changeAbsolute,
+        trend: customOperating.trend,
+        currentPeriodLabel: 'الفترة المحددة',
+        previousPeriodLabel: 'الفترة السابقة',
+      }
+    : {
+        current: totalOperating,
+        previous: prevOperating,
+        changePercent: operatingChange,
+        changeAbsolute: totalOperating - prevOperating,
+        trend: (totalOperating > prevOperating ? 'up' : totalOperating < prevOperating ? 'down' : 'neutral') as 'up' | 'down' | 'neutral',
+        currentPeriodLabel: 'الفترة الحالية',
+        previousPeriodLabel: prevPeriodLabel,
+      };
 
   // PDF & CSV Export Handlers
   const handleExportPDF = async () => {
@@ -730,6 +802,16 @@ export const AdminDashboardPage: React.FC = () => {
             </h3>
           </div>
 
+          {/* 💰 قيمة المخزون الحالية */}
+          <div className="flex items-center justify-between gap-2 bg-[#faf8f5] border border-gray-100 rounded-xl px-3 py-2">
+            <span className="font-mono font-bold text-[#2e5b9f] text-xs">
+              {formatPrice(inventoryValue)}
+            </span>
+            <span className="text-[11px] text-gray-500 font-bold">
+              💰 قيمة المخزون الحالية (كمية × تكلفة)
+            </span>
+          </div>
+
           {lowStockItems.length === 0 ? (
             <div className="text-center py-6 text-emerald-600 bg-emerald-50/50 rounded-2xl border border-emerald-100 text-xs font-bold">
               ✓ كافة خامات المخزن متوفرة وبأرصدة آمنة.
@@ -748,9 +830,16 @@ export const AdminDashboardPage: React.FC = () => {
                     توريد ←
                   </button>
                   <div className="flex items-center gap-2 text-right">
-                    <span className="font-bold text-amber-900 text-xs">
-                      {item.name}: <strong className="font-mono text-amber-950">{formatNumber(item.quantity)} {item.unit}</strong>
-                    </span>
+                    <div>
+                      <span className="font-bold text-amber-900 text-xs block">
+                        {item.name}: <strong className="font-mono text-amber-950">{formatNumber(item.quantity)} {item.unit}</strong>
+                      </span>
+                      {item.costPrice ? (
+                        <span className="text-[10px] text-amber-700 font-mono block mt-0.5">
+                          التكلفة: {formatPrice(item.costPrice)} / {item.unit}
+                        </span>
+                      ) : null}
+                    </div>
                     <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0" />
                   </div>
                 </div>

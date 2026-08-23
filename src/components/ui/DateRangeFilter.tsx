@@ -49,6 +49,17 @@ const PRESET_LABELS: Record<PresetRange, string> = {
   custom: 'نطاق مخصص',
 };
 
+/** تسميات مختصرة لصف الاختصارات المضغوط */
+const PRESET_SHORT_LABELS: Record<PresetRange, string> = {
+  today: 'اليوم',
+  yesterday: 'أمس',
+  week: '٧ أيام',
+  month: 'شهر',
+  quarter: 'ربع',
+  year: 'عام',
+  custom: 'مخصص',
+};
+
 const PRESET_OPTIONS: PresetRange[] = ['today', 'yesterday', 'week', 'month', 'quarter', 'year'];
 
 const PRESET_ICONS: Record<PresetRange, React.ElementType> = {
@@ -421,44 +432,33 @@ export const DateRangeFilter: React.FC<DateRangeFilterProps> = ({
         ) : null}
       </button>
 
-      {/* ═══ Dropdown Panel ═══ */}
+      {/* ═══ Dropdown Panel — مضغوط (~350px) عشان يظهر كامل في نص الشاشة من غير أي سكرول ═══ */}
       {isOpen && (
         <div
           style={panelStyle}
           role="dialog"
           aria-label="اختيار نطاق التاريخ"
-          className="z-[70] rounded-t-3xl sm:rounded-3xl border border-gray-200/80 bg-white shadow-2xl shadow-blue-900/15 overflow-y-auto overscroll-contain max-h-[92dvh] animate-pop-in"
+          className="z-[70] rounded-t-2xl sm:rounded-2xl border border-gray-200/80 bg-white shadow-2xl shadow-blue-900/15 overflow-y-auto overscroll-contain max-h-[85dvh] animate-pop-in"
         >
-          {/* ── الهيدر المتدرج: ملخص الفترة ── */}
-          <div className="relative bg-gradient-to-l from-[#1d4277] via-[#2e5b9f] to-[#4a7cc9] px-4 pt-4 pb-6 text-white overflow-hidden">
-            {/* لمسات زخرفية ضوئية */}
-            <div className="absolute -left-8 -bottom-10 w-32 h-32 rounded-full bg-white/10 blur-2xl pointer-events-none" />
-            <div className="absolute right-16 -top-10 w-24 h-24 rounded-full bg-cyan-300/15 blur-2xl pointer-events-none" />
-
-            <div className="relative flex items-center justify-between gap-2">
-              <div className="min-w-0">
-                <p className="text-[9px] font-bold text-white/60 tracking-wider mb-0.5">
-                  الفترة المحددة
-                </p>
-                <p className="text-sm font-bold font-mono truncate drop-shadow-sm">
-                  {value.from ? formatDate(value.from, locale) : '———'}{' '}
-                  <span className="text-white/50">←</span>{' '}
-                  {value.to ? formatDate(value.to, locale) : '———'}
-                </p>
-              </div>
-              {hasFullRange && (
-                <span className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-white/15 border border-white/25 backdrop-blur-sm">
-                  <CalendarDays className="w-3 h-3" />
-                  {rangeDaysCount} يوم
-                </span>
-              )}
-            </div>
+          {/* ── الهيدر: سطر واحد ── */}
+          <div className="bg-gradient-to-l from-[#1d4277] via-[#2e5b9f] to-[#4a7cc9] px-3 py-2 text-white flex items-center justify-between gap-2">
+            <p className="text-[11px] font-bold font-mono truncate drop-shadow-sm">
+              {value.from ? formatDate(value.from, locale) : '———'}{' '}
+              <span className="text-white/50">←</span>{' '}
+              {value.to ? formatDate(value.to, locale) : '———'}
+            </p>
+            {hasFullRange && (
+              <span className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-white/15 border border-white/25">
+                <CalendarDays className="w-3 h-3" />
+                {rangeDaysCount} يوم
+              </span>
+            )}
           </div>
 
-          <div className="px-2.5 -mt-3 relative z-10 pb-1">
-            {/* ── الاختصارات السريعة: شبكة بأيقونات ── */}
+          <div className="p-2 space-y-1.5">
+            {/* ── الاختصارات السريعة: صف واحد مضغوط ── */}
             {showPresets && (
-              <div className="bg-white rounded-2xl border border-gray-100 shadow-lg shadow-blue-900/[0.07] p-1.5 grid grid-cols-3 gap-1">
+              <div className="grid grid-cols-6 gap-1">
                 {PRESET_OPTIONS.map((preset) => {
                   const Icon = PRESET_ICONS[preset];
                   const isActive = currentPreset === preset;
@@ -470,18 +470,18 @@ export const DateRangeFilter: React.FC<DateRangeFilterProps> = ({
                       disabled={disabled}
                       title={PRESET_LABELS[preset]}
                       className={`
-                        flex flex-col items-center justify-center gap-1 py-2 rounded-xl transition-all duration-150 cursor-pointer
+                        flex flex-col items-center justify-center gap-0.5 py-1.5 rounded-lg transition-all duration-150 cursor-pointer
                         ${
                           isActive
-                            ? 'bg-gradient-to-br from-[#3a6cb5] to-[#1d4277] text-white shadow-md shadow-[#2e5b9f]/30 scale-[1.03]'
+                            ? 'bg-gradient-to-br from-[#3a6cb5] to-[#1d4277] text-white shadow-md shadow-[#2e5b9f]/30'
                             : 'bg-[#faf8f5] text-gray-500 hover:bg-[#2e5b9f]/[0.07] hover:text-[#2e5b9f] active:scale-95'
                         }
                         ${disabled ? 'opacity-50 cursor-not-allowed' : ''}
                       `}
                     >
                       <Icon className="w-3.5 h-3.5" strokeWidth={2.2} />
-                      <span className="text-[9.5px] font-bold leading-none">
-                        {PRESET_LABELS[preset]}
+                      <span className="text-[8.5px] font-bold leading-none">
+                        {PRESET_SHORT_LABELS[preset]}
                       </span>
                     </button>
                   );
@@ -489,23 +489,23 @@ export const DateRangeFilter: React.FC<DateRangeFilterProps> = ({
               </div>
             )}
 
-            {/* ── التقويم ── */}
-            <div className="pt-3 px-1 pb-2">
+            {/* ── التقويم المضغوط ── */}
+            <div className="px-0.5 pb-0.5">
               {/* التنقل بين الشهور */}
-              <div className="flex items-center justify-between mb-2.5">
+              <div className="flex items-center justify-between mb-1">
                 <button
                   type="button"
                   onClick={handlePrevMonth}
                   aria-label="الشهر السابق"
-                  className="w-8 h-8 flex items-center justify-center rounded-xl text-gray-500 bg-gray-50 hover:bg-[#2e5b9f]/10 hover:text-[#2e5b9f] active:scale-90 transition-all cursor-pointer"
+                  className="w-7 h-7 flex items-center justify-center rounded-lg text-gray-500 bg-gray-50 hover:bg-[#2e5b9f]/10 hover:text-[#2e5b9f] active:scale-90 transition-all cursor-pointer"
                 >
-                  <ChevronRight className="w-4 h-4" />
+                  <ChevronRight className="w-3.5 h-3.5" />
                 </button>
-                <div className="flex items-baseline gap-1.5 select-none">
-                  <span className="font-arabic-heading font-bold text-sm text-gray-900">
+                <div className="flex items-baseline gap-1 select-none">
+                  <span className="font-arabic-heading font-bold text-xs text-gray-900">
                     {ARABIC_MONTHS[viewMonth.getMonth()]}
                   </span>
-                  <span className="font-mono text-[11px] font-bold text-[#2e5b9f] bg-[#2e5b9f]/[0.07] px-1.5 py-px rounded-md">
+                  <span className="font-mono text-[10px] font-bold text-[#2e5b9f] bg-[#2e5b9f]/[0.07] px-1.5 py-px rounded-md">
                     {viewMonth.getFullYear()}
                   </span>
                 </div>
@@ -518,18 +518,18 @@ export const DateRangeFilter: React.FC<DateRangeFilterProps> = ({
                       viewMonth.getMonth() >= maxDateNormalized.getMonth())
                   }
                   aria-label="الشهر التالي"
-                  className="w-8 h-8 flex items-center justify-center rounded-xl text-gray-500 bg-gray-50 hover:bg-[#2e5b9f]/10 hover:text-[#2e5b9f] active:scale-90 transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+                  className="w-7 h-7 flex items-center justify-center rounded-lg text-gray-500 bg-gray-50 hover:bg-[#2e5b9f]/10 hover:text-[#2e5b9f] active:scale-90 transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
                 >
-                  <ChevronLeft className="w-4 h-4" />
+                  <ChevronLeft className="w-3.5 h-3.5" />
                 </button>
               </div>
 
               {/* أسماء الأيام — الجمعة والسبت بلون مميز */}
-              <div className="grid grid-cols-7 gap-y-1 mb-1 text-center">
+              <div className="grid grid-cols-7 mb-0.5 text-center">
                 {ARABIC_DAYS.map((d, i) => (
                   <div
                     key={d}
-                    className={`py-1 text-[9.5px] font-bold tracking-tight ${
+                    className={`py-0.5 text-[8.5px] font-bold tracking-tight ${
                       i >= 5 ? 'text-rose-400' : 'text-gray-400'
                     }`}
                   >
@@ -538,8 +538,8 @@ export const DateRangeFilter: React.FC<DateRangeFilterProps> = ({
                 ))}
               </div>
 
-              {/* شبكة الأيام */}
-              <div className="grid grid-cols-7 gap-1">
+              {/* شبكة الأيام — خلايا 28px */}
+              <div className="grid grid-cols-7 gap-0.5">
                 {Array.from({ length: firstDayOfMonth }, (_, i) => (
                   <div key={`empty-${i}`} />
                 ))}
@@ -560,7 +560,7 @@ export const DateRangeFilter: React.FC<DateRangeFilterProps> = ({
                       onMouseLeave={() => setHoveredDate(null)}
                       disabled={state.isDisabled}
                       className={`
-                        relative aspect-square rounded-xl text-[11.5px] font-bold
+                        relative h-7 rounded-lg text-[10px] font-bold
                         flex items-center justify-center transition-all duration-150
                         ${getDayClass(state)}
                         ${state.isDisabled ? 'opacity-40 hover:bg-transparent' : 'cursor-pointer'}
@@ -569,7 +569,7 @@ export const DateRangeFilter: React.FC<DateRangeFilterProps> = ({
                       {day}
                       {/* نقطة اليوم الحالي */}
                       {state.isToday && !state.isEndpoint && (
-                        <span className="absolute bottom-1 w-1 h-1 rounded-full bg-[#2e5b9f]" />
+                        <span className="absolute bottom-0.5 w-1 h-1 rounded-full bg-[#2e5b9f]" />
                       )}
                     </button>
                   );
@@ -579,8 +579,8 @@ export const DateRangeFilter: React.FC<DateRangeFilterProps> = ({
           </div>
 
           {/* ── الفوتر: ملخص + مسح ── */}
-          <div className="flex items-center justify-between gap-2 px-4 py-2.5 bg-[#faf8f5]/80 border-t border-gray-100">
-            <span className="text-[10.5px] text-gray-500 font-mono truncate">
+          <div className="flex items-center justify-between gap-2 px-3 py-1.5 bg-[#faf8f5]/80 border-t border-gray-100">
+            <span className="text-[9.5px] text-gray-500 font-mono truncate">
               {value.from && !value.to ? (
                 <span className="text-[#2e5b9f] font-bold">اختر تاريخ النهاية لإتمام النطاق</span>
               ) : hasFullRange ? (
@@ -595,7 +595,7 @@ export const DateRangeFilter: React.FC<DateRangeFilterProps> = ({
               <button
                 type="button"
                 onClick={handleClear}
-                className="inline-flex items-center gap-1 shrink-0 px-2.5 py-1 rounded-lg text-[11px] font-bold text-rose-500 bg-rose-50 border border-rose-100 hover:bg-rose-500 hover:text-white hover:border-rose-500 active:scale-95 transition-all cursor-pointer"
+                className="inline-flex items-center gap-1 shrink-0 px-2 py-0.5 rounded-md text-[10px] font-bold text-rose-500 bg-rose-50 border border-rose-100 hover:bg-rose-500 hover:text-white hover:border-rose-500 active:scale-95 transition-all cursor-pointer"
               >
                 <X className="w-3 h-3" />
                 مسح

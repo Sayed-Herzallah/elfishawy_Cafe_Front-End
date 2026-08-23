@@ -57,6 +57,8 @@ export const CashierInventoryPage: React.FC = () => {
   const lowStockCount = lowStockItems.length;
   const outOfStockCount = outOfStockItems.length;
   const healthyCount = items.filter(i => i.quantity > i.minLimit).length;
+  // 💰 القيمة التقديرية للمخزون = Σ (الكمية × سعر تكلفة الوحدة)
+  const inventoryValue = items.reduce((sum, i) => sum + (Number(i.quantity) || 0) * (Number(i.costPrice) || 0), 0);
 
   // Handle Add new Inventory Item
   const handleCreateItem = async (e: React.FormEvent) => {
@@ -231,6 +233,9 @@ export const CashierInventoryPage: React.FC = () => {
           </span>
           <span className="text-[11px] text-emerald-700 mt-0.5 block">
             {formatNumber(healthyCount)} صنف بحالة ممتازة
+          </span>
+          <span className="text-[11px] text-[#2e5b9f] font-mono mt-0.5 block">
+            💰 القيمة التقديرية: {formatPrice(inventoryValue)}
           </span>
         </div>
 

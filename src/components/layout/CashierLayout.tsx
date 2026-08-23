@@ -9,10 +9,11 @@ import {
   ReceiptText,
   Menu,
   X,
+  LayoutDashboard,
 } from 'lucide-react';
 
 export const CashierLayout: React.FC = () => {
-  const { logout } = useAuth();
+  const { logout, isAdmin } = useAuth();
   const navigate = useNavigate();
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -21,6 +22,12 @@ export const CashierLayout: React.FC = () => {
     setShowLogoutConfirm(false);
     logout();
     navigate('/login', { replace: true });
+  };
+
+  // 🔐 زر العودة لنظام الإدارة — يظهر للادمن فقط (يتحقق من الصلاحية)
+  const goAdmin = () => {
+    setSidebarOpen(false);
+    navigate('/admin');
   };
 
   return (
@@ -91,7 +98,16 @@ export const CashierLayout: React.FC = () => {
           </nav>
         </div>
 
-        <div className="pt-3 border-t border-gray-100">
+        <div className="pt-3 border-t border-gray-100 space-y-2">
+          {isAdmin && (
+            <button
+              onClick={goAdmin}
+              className="w-full flex items-center justify-center gap-1.5 py-2 px-3 text-xs font-bold text-white bg-[#2e5b9f] hover:bg-[#244b85] rounded-xl transition cursor-pointer shadow-2xs"
+            >
+              <LayoutDashboard className="w-3.5 h-3.5" />
+              <span>الإدارة</span>
+            </button>
+          )}
           <button
             onClick={() => setShowLogoutConfirm(true)}
             className="w-full flex items-center justify-center gap-1.5 py-2 px-3 text-xs font-bold text-[#9f1239] bg-rose-50 hover:bg-rose-100 rounded-xl transition cursor-pointer border border-rose-250"
@@ -169,8 +185,18 @@ export const CashierLayout: React.FC = () => {
           >
             <Menu className="w-5 h-5" />
           </button>
-          
+
           <div className="hidden lg:flex items-center gap-2">
+            {isAdmin && (
+              <button
+                onClick={goAdmin}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#2e5b9f] hover:bg-[#244b85] text-white font-bold text-xs transition cursor-pointer whitespace-nowrap shadow-2xs"
+                title="العودة لنظام الإدارة — متاح للادمن فقط"
+              >
+                <LayoutDashboard className="w-3.5 h-3.5" />
+                <span>الإدارة</span>
+              </button>
+            )}
 
             <button
               onClick={() => setShowLogoutConfirm(true)}
