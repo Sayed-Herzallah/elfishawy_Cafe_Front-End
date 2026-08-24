@@ -232,7 +232,7 @@ export const CashierPOSPage: React.FC = () => {
       return;
     }
 
-    // ✅ رقم الطاولة إجباري (الـ Backend يشترطها لأوردر dine-in) — Validation أحمر على الحقل نفسه
+    // ✅ رقم الطاولة إجباري — Validation أحمر على الحقل نفسه
     const parsedTableNumber = tableNumber ? parseInt(tableNumber, 10) : NaN;
     if (isNaN(parsedTableNumber) || parsedTableNumber < 1) {
       setTableNumberError('رقم الطاولة مطلوب — اكتب رقم الطاولة قبل تأكيد الطلب');
@@ -248,8 +248,6 @@ export const CashierPOSPage: React.FC = () => {
           product: item.product._id,
           quantity: item.quantity,
         })),
-        paymentMethod: 'cash' as const,
-        orderType: 'dine-in' as const,
         tableNumber: parsedTableNumber,
         notes: orderNote,
       };
@@ -301,7 +299,7 @@ export const CashierPOSPage: React.FC = () => {
 
       if (todaySearchMode === 'table') {
         const cleanQ = q.replace(/[^0-9]/g, '');
-        if (!cleanQ) return ord.orderType === 'takeaway';
+        if (!cleanQ) return false;
         return ord.tableNumber === Number(cleanQ);
       }
 
@@ -364,14 +362,6 @@ export const CashierPOSPage: React.FC = () => {
                   <Printer className="w-3.5 h-3.5 text-[#2e5b9f]" />
                   <span className="font-bold">#{String(ord.orderNumber || '----').slice(-4)}</span>
                 </button>
-                {ord.status === 'pending' && (
-                  <span
-                    className="inline-flex items-center gap-1 py-1.5 px-2.5 rounded-xl bg-amber-50 border border-amber-200 text-xs font-bold text-amber-800 whitespace-nowrap"
-                    title="طلب لم يكتمل بعد"
-                  >
-                    <Clock className="w-3.5 h-3.5" />
-                  </span>
-                )}
               </div>
             ))}
           </div>
@@ -827,12 +817,8 @@ export const CashierPOSPage: React.FC = () => {
                           <Clock className="w-3 h-3 text-gray-400" />
                           {formatTime(ord.createdAt)}
                         </span>
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
-                          ord.orderType === 'dine-in'
-                            ? 'bg-blue-50 text-[#2e5b9f]'
-                            : 'bg-gray-100 text-gray-700'
-                        }`}>
-                          {ord.orderType === 'dine-in' ? `طاولة #${ord.tableNumber || 1}` : 'سفري'}
+                        <span className="text-[11px] text-[#2e5b9f] font-bold bg-blue-50 border border-blue-100 px-2 py-0.5 rounded-md">
+                          طاولة #{ord.tableNumber || '—'}
                         </span>
                       </div>
 

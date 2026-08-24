@@ -1079,7 +1079,7 @@ export const AdminDashboardPage: React.FC = () => {
                 <tr className="border-b border-gray-100 text-gray-400 font-semibold">
                   <th className="pb-2 px-3">رقم الفاتورة</th>
                   <th className="pb-2 px-3">التاريخ والوقت</th>
-                  <th className="pb-2 px-3">النوع / الطاولة</th>
+                  <th className="pb-2 px-3">الطاولة</th>
                   <th className="pb-2 px-3">عدد الأصناف</th>
                   <th className="pb-2 px-3">المبلغ المطلوب</th>
                   <th className="pb-2 px-3">الحالة</th>
@@ -1104,7 +1104,7 @@ export const AdminDashboardPage: React.FC = () => {
                     </td>
                     <td className="py-3 px-3">
                       <span className="inline-flex py-0.5 px-2 bg-blue-50 text-[#2e5b9f] font-bold rounded-lg text-[10px]">
-                        {order.orderType === 'dine-in' ? `طاولة #${order.tableNumber || 1}` : 'سفري'}
+                        طاولة #{order.tableNumber || '—'}
                       </span>
                     </td>
                     <td className="py-3 px-3 text-gray-500 font-mono">{formatNumber((order.items || []).length)} أصناف</td>

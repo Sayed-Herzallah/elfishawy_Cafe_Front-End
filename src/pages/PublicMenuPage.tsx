@@ -1,94 +1,35 @@
-import React, { useState, useEffect } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { publicMenuService } from '../services/catalogService';
-import { Product, Category } from '../types';
-import { Search, SearchX, ArrowLeft, X } from 'lucide-react';
-import { LoadingSkeleton } from '../components/ui/LoadingSkeleton';
+import {
+  MENU_CATEGORIES,
+  DEFAULT_MENU_IMAGE,
+  filterMenuItems,
+  getSortedCategories,
+  getCategoryById,
+  getItemPriceRange,
+} from '../data/menuData';
+import { Search, SearchX, ArrowLeft, X, Sparkles } from 'lucide-react';
+
+const ALL_FILTER = 'all';
 
 export const PublicMenuPage: React.FC = () => {
-  const [products, setProducts] = useState<Product[]>([]);
-  const [categories, setCategories] = useState<Category[]>([]);
-  const [activeCategory, setActiveCategory] = useState<string>('all');
+  const [activeCategory, setActiveCategory] = useState<string>(ALL_FILTER);
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [isLoading, setIsLoading] = useState<boolean>(true);
-  // ✅ حالة خطأ مرئية — كان الفشل صامتاً (Console فقط) والمستخدم يرى قائمة فارغة بلا تفسير
-  const [hasError, setHasError] = useState<boolean>(false);
 
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        setIsLoading(true);
-        setHasError(false);
-        // Endpoint عام (بدون تسجيل دخول) — يقرأ من قاعدة البيانات مباشرة،
-        // فأي منتج يتضاف من لوحة الأدمن يظهر هنا فوراً
-        const res = await publicMenuService.getPublicMenu();
-        if (res.success && res.data) {
-          setProducts(res.data.products || []);
-          setCategories(res.data.categories || []);
-        } else {
-          setHasError(true);
-        }
-      } catch (err) {
-        console.error('Error fetching public menu', err);
-        setHasError(true);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-    fetchData();
-  }, []);
+  const categories = getSortedCategories();
 
-  const filteredProducts = products.filter((p) => {
-    const catId = typeof p.category === 'string' ? p.category : p.category._id;
-    const matchesCat = activeCategory === 'all' || catId === activeCategory;
-    const matchesSearch =
-      searchQuery.trim() === '' ||
-      p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (p.description || '').toLowerCase().includes(searchQuery.toLowerCase());
-    return matchesCat && matchesSearch;
-  });
+  // المنيو ثابت (Static) — الفلترة والبحث تحدث فورًا بدون أي طلبات شبكة
+  const filteredItems = useMemo(
+    () => filterMenuItems({ categoryId: activeCategory, searchQuery }),
+    [activeCategory, searchQuery]
+  );
 
   const resetFilters = () => {
     setSearchQuery('');
-    setActiveCategory('all');
+    setActiveCategory(ALL_FILTER);
   };
 
-  const hasActiveFilter = searchQuery.trim() !== '' || activeCategory !== 'all';
-
-  // بناء كروت المنيو: المنتجات اللي ليها نفس "مجموعة المنيو" بتظهر ككارت واحد والخيارات جواه
-  const menuCards = (() => {
-    const cards: {
-      key: string;
-      title: string;
-      description: string;
-      image: string;
-      inStock: boolean;
-      variants: { _id: string; name: string; price: number; inStock: boolean }[];
-    }[] = [];
-    const groupIndex = new Map<string, number>();
-
-    for (const p of filteredProducts) {
-      const img = p.image?.secure_url || 'https://images.unsplash.com/photo-1514432324607-a09d9b4aefdd?q=80&w=800&auto=format&fit=crop';
-            variant: { _id: p._id, name: p.name, price: p.price, inStock: p.inStock, baseName: p.baseName || "" };
-      const group = (p.baseName || p.name).trim();
-
-      if (group) {
-        const existingIdx = groupIndex.get(group);
-        if (existingIdx !== undefined) {
-          const card = cards[existingIdx];
-          card.variants.push(variant);
-          card.inStock = card.inStock || p.inStock;
-          if (!card.image.startsWith('https://images.unsplash') && p.image?.secure_url) card.image = img;
-        } else {
-          groupIndex.set(group, cards.length);
-          cards.push({ key: `group:${group}`, title: group, description: p.description || '', image: img, inStock: p.inStock, variants: [variant] });
-        }
-      } else {
-        cards.push({ key: `single:${p._id}`, title: p.name, description: p.description || '', image: img, inStock: p.inStock, variants: [variant] });
-      }
-    }
-    return cards;
-  })();
+  const hasActiveFilter = searchQuery.trim() !== '' || activeCategory !== ALL_FILTER;
 
   return (
     <div className="min-h-screen bg-[#fcfaf7] text-[#1c1917] pb-24">
@@ -104,10 +45,10 @@ export const PublicMenuPage: React.FC = () => {
 
         <div className="relative z-10 text-center space-y-4 max-w-xl mx-auto">
           <h1 className="text-4xl md:text-5xl font-bold font-arabic-heading">
-            منيو كافيه الفيشاوي
+            منيو مقهى الفيشاوي
           </h1>
           <p className="text-lg md:text-xl text-white/80 font-calligraphy max-w-2xl mx-auto">
-            قائمة المشروبات والأصناف المتاحة
+            قائمة المشروبات المتاحة وأسعارها
           </p>
           <div className="pt-2">
             <Link
@@ -119,134 +60,159 @@ export const PublicMenuPage: React.FC = () => {
             </Link>
           </div>
         </div>
-</div>
- 
-       {/* Dynamic Catalog Section with Filter & Search */}
-       <section className="py-12 px-6 max-w-6xl mx-auto w-full">
-         <div className="flex flex-col md:flex-row items-center justify-between gap-6 mb-10">
-           {/* Search Box */}
-            <div className="relative w-full md:w-80 text-right">
-              <Search className="w-4 h-4 text-[#2e5b9f] absolute right-3.5 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                placeholder="ابحث عن مشروب أو صنف مثل: كابتشينو، لاتيه، كرواسون"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full bg-white border border-gray-200 rounded-xl pr-10 pl-9 py-2.5 text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-[#2e5b9f]/20 focus:border-[#2e5b9f] shadow-2xs"
-              />
-              {searchQuery && (
-                <button
-                  onClick={() => setSearchQuery('')}
-                  aria-label="مسح البحث"
-                  className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 cursor-pointer"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              )}
+      </div>
+
+      {/* Menu Catalog Section with Filter & Search */}
+      <section className="py-12 px-6 max-w-6xl mx-auto w-full">
+        <div className="flex flex-col md:flex-row items-center justify-between gap-6 mb-10">
+          {/* Search Box */}
+          <div className="relative w-full md:w-80 text-right">
+            <Search className="w-4 h-4 text-[#2e5b9f] absolute right-3.5 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              placeholder="ابحث عن مشروب مثل: قهوة، شاي، مانجو"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full bg-white border border-gray-200 rounded-xl pr-10 pl-9 py-2.5 text-sm text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-[#2e5b9f]/20 focus:border-[#2e5b9f] shadow-2xs"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                aria-label="مسح البحث"
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+
+          {/* Category Filter Pills */}
+          <div className="flex flex-wrap items-center justify-center gap-2 w-full md:w-auto">
+            <button
+              onClick={() => setActiveCategory(ALL_FILTER)}
+              className={`py-2 px-4 rounded-xl text-xs font-bold transition whitespace-nowrap ${
+                activeCategory === ALL_FILTER
+                  ? 'bg-[#2e5b9f] text-white shadow-xs'
+                  : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'
+              }`}
+            >
+              الكل
+            </button>
+            {categories.map((cat) => (
+              <button
+                key={cat.id}
+                onClick={() => setActiveCategory(cat.id)}
+                className={`py-2 px-4 rounded-xl text-xs font-bold transition whitespace-nowrap ${
+                  activeCategory === cat.id
+                    ? 'bg-[#2e5b9f] text-white shadow-xs'
+                    : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'
+                }`}
+              >
+                <span className="ml-1">{cat.icon}</span>
+                {cat.name}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Menu Cards Grid */}
+        {filteredItems.length === 0 ? (
+          <div className="text-center py-16 bg-white rounded-2xl border border-gray-100 p-8">
+            <div className="w-14 h-14 rounded-2xl bg-[#2e5b9f]/5 border border-[#2e5b9f]/15 flex items-center justify-center text-[#2e5b9f] mx-auto mb-3">
+              <SearchX className="w-6 h-6" />
             </div>
- 
-           {/* Category Filter Pills - Responsive Wrap */}
-           <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
-             <button
-               onClick={() => setActiveCategory('all')}
-               className={`py-2 px-4 rounded-xl text-xs font-bold transition whitespace-nowrap ${
-                 activeCategory === 'all'
-                   ? 'bg-[#2e5b9f] text-white shadow-xs'
-                   : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'
-               }`}
-             >
-               الكل
-             </button>
-             {categories.map((cat) => (
-               <button
-                 key={cat._id}
-                 onClick={() => setActiveCategory(cat._id)}
-                 className={`py-2 px-4 rounded-xl text-xs font-bold transition whitespace-nowrap ${
-                   activeCategory === cat._id
-                     ? 'bg-[#2e5b9f] text-white shadow-xs'
-                     : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'
-                 }`}
-               >
-                 {cat.name}
-               </button>
-             ))}
-           </div>
-         </div>
- 
-         {/* Product Cards Grid */}
-         {isLoading ? (
-           <LoadingSkeleton type="tile" count={8} />
-         ) : hasError ? (
-            <div className="text-center py-16 bg-white rounded-2xl border border-gray-100 p-8">
-              <div className="w-14 h-14 rounded-2xl bg-rose-50 border border-rose-100 flex items-center justify-center text-rose-500 mx-auto mb-3">
-                <SearchX className="w-6 h-6" />
-              </div>
-              <p className="text-gray-700 font-bold text-sm">تعذر تحميل المنيو حالياً</p>
-              <p className="text-xs text-gray-500 mt-2 max-w-sm mx-auto leading-relaxed">
-                نتواجه مشكلة في الاتصال بالخادم. حاول تحديث الصفحة بعد قليل، أو تفضل بزيارتنا في المقهى.
-              </p>
-            </div>
-          ) : filteredProducts.length === 0 ? (
-           <div className="text-center py-16 bg-white rounded-2xl border border-gray-100 p-8">
-             <div className="w-14 h-14 rounded-2xl bg-[#2e5b9f]/5 border border-[#2e5b9f]/15 flex items-center justify-center text-[#2e5b9f] mx-auto mb-3">
-                <SearchX className="w-6 h-6" />
-              </div>
-              <p className="text-gray-600 font-bold text-sm">{searchQuery.trim() ? 'لا توجد نتائج مطابقة لبحثك' : 'لا توجد أصناف في هذه الفئة'}</p>
-              <p className="text-xs text-gray-500 mt-2">{searchQuery.trim() ? `لم نجد أي مشروب أو صنف باسم «${searchQuery.trim()}». جرّب كلمة أخرى أو تصفّح فئة مختلفة.` : 'لا توجد أصناف متاحة ضمن هذه الفئة، جرّب فئة أخرى.'}</p>
-              {hasActiveFilter && (
-                <button
-                  onClick={resetFilters}
-                  className="mt-4 inline-flex items-center gap-1.5 bg-[#2e5b9f] hover:bg-[#244b85] text-white font-bold py-2 px-4 rounded-xl text-xs transition cursor-pointer shadow-2xs"
+            <p className="text-gray-600 font-bold text-sm">لا توجد نتائج مطابقة لبحثك</p>
+            <p className="text-xs text-gray-500 mt-2 max-w-md mx-auto leading-relaxed">
+              {searchQuery.trim()
+                ? `لم نجد أي مشروب باسم «${searchQuery.trim()}». جرّب كلمة أخرى أو تصفّح تصنيفاً مختلفاً.`
+                : 'لا توجد أصناف معروضة في هذا التصنيف حالياً، جرّب تصنيفاً آخر.'}
+            </p>
+            {hasActiveFilter && (
+              <button
+                onClick={resetFilters}
+                className="mt-4 inline-flex items-center gap-1.5 bg-[#2e5b9f] hover:bg-[#244b85] text-white font-bold py-2 px-4 rounded-xl text-xs transition cursor-pointer shadow-2xs"
+              >
+                <X className="w-3.5 h-3.5" />
+                مسح البحث والفلاتر
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+            {filteredItems.map((item) => {
+              const category = getCategoryById(item.categoryId);
+              const availableVariants = item.variants.filter((v) => v.isAvailable);
+              const priceRange = getItemPriceRange(item);
+              const hasMultiplePrices = priceRange.min !== priceRange.max;
+
+              return (
+                <article
+                  key={item.id}
+                  className="bg-white rounded-2xl overflow-hidden border border-gray-100/90 shadow-sm hover:shadow-md transition-all duration-200 flex flex-col"
                 >
-                  <X className="w-3.5 h-3.5" />
-                  مسح البحث والفلاتر
-                </button>
-              )}
-           </div>
-         ) : (
-           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-             {filteredProducts.map((prod) => (
-               <div
-                 key={prod._id}
-                 className="bg-white rounded-2xl overflow-hidden border border-gray-100/90 shadow-sm hover:shadow-md transition-all duration-200 flex flex-col justify-between"
-               >
-                 <div className="relative aspect-4/3 w-full bg-gray-100 overflow-hidden">
-                   <img
-                     src={prod.image?.secure_url || 'https://images.unsplash.com/photo-1514432324607-a09d9b4aefdd?q=80&w=800&auto=format&fit=crop'}
-                     alt={prod.name}
-                     className="w-full h-full object-cover"
-                   />
-                   <div className="absolute top-2.5 right-2.5">
-                     <span
-                       className={`text-[10px] font-bold py-1 px-2.5 rounded-md shadow-xs ${
-                         prod.inStock
-                           ? 'bg-[#2e5b9f] text-white'
-                           : 'bg-rose-600 text-white'
-                       }`}
-                     >
-                       {prod.inStock ? 'متوفر' : 'غير متوفر'}
-                     </span>
-                   </div>
-                 </div>
- 
-                 <div className="p-4 text-right flex flex-col justify-between flex-1">
-                   <div>
-                     <h3 className="font-bold text-gray-900 text-sm">{prod.name}</h3>
-                     {prod.description && (
-                       <p className="text-[11px] text-gray-500 mt-1 line-clamp-2">{prod.description}</p>
-                     )}
-                   </div>
- 
-                   <div className="pt-3 mt-3 border-t border-gray-50 flex items-baseline justify-between">
-                     <span className="text-[11px] text-gray-400">السعر</span>
-                     <span className="font-bold text-sm text-[#2e5b9f] font-mono">{prod.price} جنيها</span>
-                   </div>
-                 </div>
-               </div>
-             ))}
-           </div>
-         )}
-       </section>
-     </div>
-   );
- };
+                  <div className="relative aspect-4/3 w-full bg-gray-100 overflow-hidden">
+                    <img
+                      src={item.image}
+                      alt={item.name}
+                      loading="lazy"
+                      onError={(e) => {
+                        e.currentTarget.src = DEFAULT_MENU_IMAGE;
+                      }}
+                      className="w-full h-full object-cover"
+                    />
+                    <div className="absolute top-2.5 right-2.5 flex items-center gap-1.5">
+                      {item.isPopular && (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-bold py-1 px-2.5 rounded-md shadow-xs bg-amber-400 text-amber-950">
+                          <Sparkles className="w-3 h-3" />
+                          الأكثر طلباً
+                        </span>
+                      )}
+                      {category && (
+                        <span className="text-[10px] font-bold py-1 px-2.5 rounded-md shadow-xs bg-white/90 text-gray-700">
+                          {category.icon} {category.name}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="p-4 text-right flex flex-col flex-1">
+                    <h3 className="font-bold text-gray-900 text-base">{item.name}</h3>
+                    {item.description && (
+                      <p className="text-[11px] text-gray-500 mt-1 line-clamp-2 leading-relaxed">{item.description}</p>
+                    )}
+
+                    {/* أنواع الصنف مع أسعارها */}
+                    {availableVariants.length > 0 && (
+                      <ul className="mt-3 space-y-1.5 flex-1">
+                        {availableVariants.map((variant) => (
+                          <li
+                            key={variant.id}
+                            className="flex items-center justify-between bg-[#faf8f5] border border-gray-100 rounded-lg px-3 py-1.5"
+                          >
+                            <span className="text-xs font-bold text-gray-700">{variant.label}</span>
+                            <span className="text-sm font-extrabold font-mono text-[#2e5b9f]">
+                              {variant.price} <span className="text-[10px] font-sans font-medium text-gray-500">جنيها</span>
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+
+                    <div className="pt-3 mt-3 border-t border-gray-50 flex items-baseline justify-between">
+                      <span className="text-[11px] text-gray-400">
+                        {hasMultiplePrices ? 'يبدأ السعر من' : 'السعر'}
+                      </span>
+                      <span className="font-bold text-sm text-[#2e5b9f] font-mono">
+                        {hasMultiplePrices ? `${priceRange.min} - ${priceRange.max}` : priceRange.min} جنيها
+                      </span>
+                    </div>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        )}
+      </section>
+    </div>
+  );
+};

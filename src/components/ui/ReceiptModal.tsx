@@ -71,12 +71,8 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ order, isOpen, onClo
               <span className="font-mono text-[11px] text-gray-500">{formattedDate}</span>
             </div>
             <div className="mt-1.5 flex items-center justify-between text-xs text-gray-600 px-1" dir="rtl">
-              {order.tableNumber ? (
-                <span className="font-bold text-gray-800">طاولة رقم: <strong className="text-[#2e5b9f] font-mono text-sm">#{order.tableNumber}</strong></span>
-              ) : (
-                <span className="text-gray-500 font-medium">طلب سفري</span>
-              )}
-              <span className="font-mono text-[11px] text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded">مدفوع نقداً</span>
+              <span className="font-bold text-gray-800">طاولة رقم: <strong className="text-[#2e5b9f] font-mono text-sm">#{order.tableNumber || '—'}</strong></span>
+              <span className="font-mono text-[11px] text-gray-400 font-bold bg-gray-100 px-2 py-0.5 rounded">{formatNumber(totalItemsCount)} صنف</span>
             </div>
             {order.notes && order.notes.trim() !== '' && (
               <div className="mt-2 bg-amber-50/70 border border-amber-200/60 p-2 rounded-xl text-xs text-amber-900 text-right font-bold print:border-dashed">

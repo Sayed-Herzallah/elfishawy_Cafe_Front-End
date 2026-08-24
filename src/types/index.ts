@@ -33,6 +33,10 @@ export interface ProductImage {
 export interface Product {
   _id: string;
   name: string;
+  /** الاسم الأساسي كما كتبه الأدمن — يستخدم لتجميع الأنواع */
+  baseName?: string;
+  /** نوع المنتج: سادة / زيادة / دبل... */
+  variantType?: string;
   description?: string;
   price: number;
   image?: ProductImage;
@@ -40,7 +44,6 @@ export interface Product {
   inStock: boolean;
   stockQuantity: number;
   availableQuantityByRecipe?: number | null;
-  menuGroup?: string;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -78,8 +81,6 @@ export interface InventoryItem {
   updatedAt?: string;
 }
 
-export type PaymentMethod = 'cash' | 'card';
-export type OrderType = 'dine-in' | 'takeaway';
 export type OrderStatus = 'pending' | 'completed' | 'cancelled';
 
 export interface OrderItem {
@@ -94,8 +95,6 @@ export interface Order {
   items: OrderItem[];
   totalAmount: number;
   status: OrderStatus;
-  paymentMethod: PaymentMethod;
-  orderType: OrderType;
   tableNumber?: number;
   notes?: string;
   cashierId: string | { _id: string; userName: string; email: string };

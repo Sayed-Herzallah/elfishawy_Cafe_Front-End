@@ -2,10 +2,9 @@ import { ApiClient } from './api/apiClient';
 import { ApiResponse, Order, InventoryItem, Expense, KPIStats, ChartsData, OrderStatus } from '../types';
 
 export const orderService = {
-  getOrders: (params?: { status?: string; orderType?: string; searchDate?: string; cashierId?: string }): Promise<ApiResponse<Order[]>> => {
+  getOrders: (params?: { status?: string; searchDate?: string; cashierId?: string }): Promise<ApiResponse<Order[]>> => {
     const query = new URLSearchParams();
     if (params?.status) query.append('status', params.status);
-    if (params?.orderType) query.append('orderType', params.orderType);
     if (params?.searchDate) query.append('searchDate', params.searchDate);
     if (params?.cashierId) query.append('cashierId', params.cashierId);
     const qs = query.toString();
@@ -18,9 +17,8 @@ export const orderService = {
 
   createOrder: (payload: {
     items: { product: string; quantity: number }[];
-    paymentMethod?: 'cash' | 'card';
-    orderType?: 'dine-in' | 'takeaway';
-    tableNumber?: number;
+    tableNumber: number;
+    notes?: string;
   }): Promise<ApiResponse<Order>> => {
     return ApiClient.request<Order>('/orders', {
       method: 'POST',
@@ -36,10 +34,9 @@ export const orderService = {
   },
 
   updateOrder: (id: string, payload: {
-    items: { product: string; quantity: number }[];
-    paymentMethod?: 'cash' | 'card';
-    orderType?: 'dine-in' | 'takeaway';
+    items?: { product: string; quantity: number }[];
     tableNumber?: number;
+    notes?: string;
   }): Promise<ApiResponse<Order>> => {
     return ApiClient.request<Order>(`/orders/${id}`, {
       method: 'PATCH',

@@ -62,7 +62,7 @@ export const AdminProductsPage: React.FC = () => {
     price: '',
     category: '',
     stockQuantity: '',
-    menuGroup: '',
+    variantType: '',
     imageFile: null as File | null,
   });
   const [formErrors, setFormErrors] = useState<{ name?: string; description?: string; price?: string; category?: string; stockQuantity?: string; imageFile?: string }>({});
@@ -200,7 +200,7 @@ export const AdminProductsPage: React.FC = () => {
       price: '',
       category: categories[0]?._id || '',
       stockQuantity: '',
-      menuGroup: '',
+      variantType: '',
       imageFile: null,
     });
     setIsModalOpen(true);
@@ -220,7 +220,7 @@ export const AdminProductsPage: React.FC = () => {
       price: String(prod.price),
       category: catId,
       stockQuantity: String(prod.stockQuantity),
-      menuGroup: prod.menuGroup || '',
+      variantType: prod.variantType || '',
       imageFile: null,
     });
     
@@ -376,7 +376,9 @@ export const AdminProductsPage: React.FC = () => {
         : (formData.stockQuantity || '0');
         
       data.append('stockQuantity', finalStockQty);
-      data.append('menuGroup', formData.menuGroup.trim());
+      if (formData.variantType.trim()) {
+        data.append('variantType', formData.variantType.trim());
+      }
       if (formData.imageFile) {
         data.append('image', formData.imageFile);
       }
@@ -1133,18 +1135,18 @@ export const AdminProductsPage: React.FC = () => {
 
           <div>
             <label className="block text-xs font-semibold mb-1.5 text-gray-700">
-              مجموعة المنيو <span className="text-gray-400 font-normal">(اختياري)</span>
+              نوع المنتج <span className="text-gray-400 font-normal">(اختياري)</span>
             </label>
             <input
               type="text"
-              maxLength={50}
-              placeholder="مثال: قهوة"
-              value={formData.menuGroup}
-              onChange={(e) => setFormData({ ...formData, menuGroup: e.target.value })}
+              maxLength={30}
+              placeholder="مثال: سادة"
+              value={formData.variantType}
+              onChange={(e) => setFormData({ ...formData, variantType: e.target.value })}
               className="w-full bg-[#faf8f5] hover:bg-white focus:bg-white border border-gray-200 rounded-xl p-3 text-xs outline-none focus:ring-2 focus:ring-[#2e5b9f]/20 focus:border-[#2e5b9f]"
             />
             <p className="text-[11px] text-gray-400 mt-1">
-              اكتب نفس الاسم لأكثر من منتج عشان يظهروا كخيارات في كارت واحد بالمنيو العام (مثال: قهوة سادة + قهوة زيادة ← مجموعة «قهوة»)
+              الاسم النهائي للفاتورة = اسم المنتج + النوع (مثال: «قهوة» + «سادة» ← قهوة سادة). اتركه فارغاً لو المنتج له نوع واحد فقط.
             </p>
           </div>
 

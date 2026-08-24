@@ -8,7 +8,6 @@ import { ReceiptModal } from '../../components/ui/ReceiptModal';
 import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
-import { Select } from '../../components/ui/Select';
 import { LoadingSkeleton } from '../../components/ui/LoadingSkeleton';
 import { Pagination } from '../../components/ui/Pagination';
 import { DateRangeFilter, DateRange } from '../../components/ui/DateRangeFilter';
@@ -51,8 +50,6 @@ export const AdminSalesPage: React.FC = () => {
   const [isEditOrderModalOpen, setIsEditOrderModalOpen] = useState<boolean>(false);
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
   const [editOrderData, setEditOrderData] = useState({
-    paymentMethod: 'cash' as 'cash' | 'card',
-    orderType: 'dine-in' as 'dine-in' | 'takeaway',
     tableNumber: '',
   });
   const [isEditOrderSubmitting, setIsEditOrderSubmitting] = useState<boolean>(false);
@@ -116,11 +113,8 @@ export const AdminSalesPage: React.FC = () => {
 
     try {
       setIsEditOrderSubmitting(true);
-      const payload: Record<string, any> = {
-        paymentMethod: editOrderData.paymentMethod,
-        orderType: editOrderData.orderType,
-      };
-      if (editOrderData.orderType === 'dine-in' && editOrderData.tableNumber) {
+      const payload: Record<string, any> = {};
+      if (editOrderData.tableNumber) {
         payload.tableNumber = Number(editOrderData.tableNumber);
       }
 
@@ -299,7 +293,7 @@ export const AdminSalesPage: React.FC = () => {
                   <th className="pb-3 px-3">رقم الفاتورة</th>
                   <th className="pb-3 px-3">التاريخ / الوقت</th>
                   <th className="pb-3 px-3">الأصناف</th>
-                  <th className="pb-3 px-3">النوع / الطاولة</th>
+                  <th className="pb-3 px-3">الطاولة</th>
                   <th className="pb-3 px-3">المبلغ</th>
                   <th className="pb-3 px-3">الحالة</th>
                   <th className="pb-3 px-3 text-left">الإجراء</th>
@@ -335,7 +329,9 @@ export const AdminSalesPage: React.FC = () => {
                         {itemsLabel || '—'}
                       </td>
                       <td className="py-3 px-3">
-                        {order.orderType === 'dine-in' ? `صالة #${order.tableNumber || 1}` : 'سفري'}
+                        <span className="inline-flex py-0.5 px-2 bg-blue-50 text-[#2e5b9f] font-bold rounded-lg text-[10px]">
+                          طاولة #{order.tableNumber || '—'}
+                        </span>
                       </td>
                       <td className="py-3 px-3 font-bold font-mono text-gray-900">
                         {formatPrice(order.totalAmount)}
@@ -403,11 +399,11 @@ export const AdminSalesPage: React.FC = () => {
                     currency: '',
                   }}
                   metadata={[
-                    { label: 'النوع', value: order.orderType === 'dine-in' ? `صالة #${order.tableNumber || 1}` : 'سفري', icon: <ShoppingBag className="w-3.5 h-3.5" /> },
+                    { label: 'الطاولة', value: `#${order.tableNumber || '—'}`, icon: <ShoppingBag className="w-3.5 h-3.5" /> },
                     { label: 'الوقت', value: formatTime(order.createdAt), icon: <Calendar className="w-3.5 h-3.5" /> },
                     { label: 'عدد الأصناف', value: formatNumber(safeItems.length), icon: <ShoppingBag className="w-3.5 h-3.5" /> },
                   ]}
-                  tags={[order.orderType === 'dine-in' ? `طاولة #${order.tableNumber || 1}` : 'سفري']}
+                  tags={[`طاولة #${order.tableNumber || '—'}`]}
                   actions={[
                     {
                       icon: <Printer className="w-3.5 h-3.5" />,
@@ -424,16 +420,14 @@ export const AdminSalesPage: React.FC = () => {
                     ...(order.status !== 'cancelled' ? [{
                       icon: <Edit2 className="w-3.5 h-3.5" />,
                       label: 'تعديل',
-                      onClick: (e: React.MouseEvent) => {
-                        e.stopPropagation();
-                        setEditingOrder(order);
-                        setEditOrderData({
-                          paymentMethod: order.paymentMethod as 'cash' | 'card',
-                          orderType: order.orderType as 'dine-in' | 'takeaway',
-                          tableNumber: order.tableNumber ? String(order.tableNumber) : '',
-                        });
-                        setIsEditOrderModalOpen(true);
-                      },
+                       onClick: (e: React.MouseEvent) => {
+                         e.stopPropagation();
+                         setEditingOrder(order);
+                         setEditOrderData({
+                           tableNumber: order.tableNumber ? String(order.tableNumber) : '',
+                         });
+                         setIsEditOrderModalOpen(true);
+                       },
                       variant: 'default' as const,
                     }] : []),
                     ...(order.status === 'pending' ? [{
@@ -452,9 +446,9 @@ export const AdminSalesPage: React.FC = () => {
                 >
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
                     <div className="flex flex-col">
-                      <span className="text-gray-500">المكان</span>
+                      <span className="text-gray-500">الطاولة</span>
                       <span className="font-medium text-gray-900">
-                        {order.orderType === 'dine-in' ? `صالة #${order.tableNumber || 1}` : 'سفري'}
+                        #{order.tableNumber || '—'}
                       </span>
                     </div>
                     <div className="flex flex-col">
@@ -531,42 +525,16 @@ export const AdminSalesPage: React.FC = () => {
             ⚠️ تعديل الطلب يحسب الفرق في المخزون تلقائياً. لا يمكن تعديل الأصناف من هنا — استخدم الإلغاء وإنشاء طلب جديد لتغيير المنتجات.
           </div>
 
-          <Select
-            label="طريقة الدفع *"
-            value={editOrderData.paymentMethod}
+          <Input
+            label="رقم الطاولة"
+            type="number"
+            min="1"
+            placeholder="اتركه فارغاً للإبقاء على الرقم الحالي"
+            value={editOrderData.tableNumber}
             onChange={(e) =>
-              setEditOrderData({ ...editOrderData, paymentMethod: e.target.value as 'cash' | 'card' })
+              setEditOrderData({ ...editOrderData, tableNumber: e.target.value })
             }
-            options={[
-              { value: 'cash', label: '💵 نقدي' },
-              { value: 'card', label: '💳 بطاقة' },
-            ]}
           />
-
-          <Select
-            label="نوع الطلب *"
-            value={editOrderData.orderType}
-            onChange={(e) =>
-              setEditOrderData({ ...editOrderData, orderType: e.target.value as 'dine-in' | 'takeaway' })
-            }
-            options={[
-              { value: 'dine-in', label: '🪑 صالة (Dine-in)' },
-              { value: 'takeaway', label: '🛍️ سفري (Takeaway)' },
-            ]}
-          />
-
-          {editOrderData.orderType === 'dine-in' && (
-            <Input
-              label="رقم الطاولة"
-              type="number"
-              min="1"
-              placeholder="مثال: 5"
-              value={editOrderData.tableNumber}
-              onChange={(e) =>
-                setEditOrderData({ ...editOrderData, tableNumber: e.target.value })
-              }
-            />
-          )}
 
           <div className="pt-4 flex items-center justify-end gap-2 border-t border-gray-100">
             <Button

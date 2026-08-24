@@ -115,9 +115,7 @@ export const CashierOrdersTrackerPage: React.FC = () => {
       if (searchMode === 'table') {
         // Specific search for table number
         const cleanQ = q.replace(/[^0-9]/g, '');
-        if (!cleanQ) {
-          return matchesStatus && order.orderType === 'takeaway';
-        }
+        if (!cleanQ) return false;
         return matchesStatus && order.tableNumber === Number(cleanQ);
       }
 
@@ -169,12 +167,12 @@ export const CashierOrdersTrackerPage: React.FC = () => {
     try {
       const csvRows = [
         ['سجل يومية طلبات الكاشير - مقهى الفيشاوي', `التاريخ: ${new Date().toLocaleDateString('ar-EG')}`],
-        ['التسلسل', 'رقم الفاتورة', 'الوقت', 'النوع / الطاولة', 'عدد الأصناف', 'المبلغ', 'الحالة'],
+        ['التسلسل', 'رقم الفاتورة', 'الوقت', 'الطاولة', 'عدد الأصناف', 'المبلغ', 'الحالة'],
         ...filteredOrders.map((o, idx) => [
           `#${filteredOrders.length - idx}`,
           `#${String(o.orderNumber || o._id || '').slice(-8)}`,
           formatTime(o.createdAt),
-          o.orderType === 'dine-in' ? `طاولة #${o.tableNumber || 1}` : 'سفري',
+          `طاولة #${o.tableNumber || 1}`,
           `${(o.items || []).length} أصناف`,
           `${o.totalAmount} جنيها`,
           o.status === 'completed' ? 'تم التسليم' : 'قيد التحضير',
@@ -441,9 +439,7 @@ export const CashierOrdersTrackerPage: React.FC = () => {
                   {/* Order Meta */}
                   <div className="py-2.5 flex items-center justify-between text-xs text-gray-700" dir="rtl">
                     <span className="font-bold">
-                      {order.orderType === 'dine-in'
-                        ? `طاولة رقم #${order.tableNumber || 1}`
-                        : 'طلب سفري / تيك أواي 🛍️'}
+                      طاولة رقم #{order.tableNumber || '—'}
                     </span>
                     <span className="text-xs text-gray-400 font-mono">
                       {formatNumber((order.items || []).length)} أصناف
@@ -523,7 +519,7 @@ export const CashierOrdersTrackerPage: React.FC = () => {
                 <th className="pb-3 px-3">التسلسل</th>
                 <th className="pb-3 px-3">رقم الفاتورة</th>
                 <th className="pb-3 px-3">الوقت والتاريخ</th>
-                <th className="pb-3 px-3">النوع / الطاولة</th>
+                <th className="pb-3 px-3">الطاولة</th>
                 <th className="pb-3 px-3">الأصناف المطلوبة</th>
                 <th className="pb-3 px-3">المبلغ الإجمالي</th>
                 <th className="pb-3 px-3">الحالة</th>
@@ -547,15 +543,9 @@ export const CashierOrdersTrackerPage: React.FC = () => {
                       {formatTime(order.createdAt)}
                     </td>
                     <td className="py-3.5 px-3 font-bold">
-                      {order.orderType === 'dine-in' ? (
-                        <span className="inline-flex py-0.5 px-2 bg-blue-50 text-[#2e5b9f] rounded-lg">
-                          طاولة #{order.tableNumber || 1}
-                        </span>
-                      ) : (
-                        <span className="inline-flex py-0.5 px-2 bg-gray-100 text-gray-700 rounded-lg">
-                          سفري
-                        </span>
-                      )}
+                      <span className="inline-flex py-0.5 px-2 bg-blue-50 text-[#2e5b9f] rounded-lg">
+                        طاولة #{order.tableNumber || '—'}
+                      </span>
                     </td>
                     <td className="py-3.5 px-3 text-gray-600">
                       {(order.items || []).map((it) => `${it && typeof it.product === 'object' && it.product ? (it.product as any).name : 'صنف'} (×${it.quantity})`).join(', ')}

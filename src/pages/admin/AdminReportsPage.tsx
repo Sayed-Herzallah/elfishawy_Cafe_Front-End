@@ -743,7 +743,7 @@ export const AdminReportsPage: React.FC = () => {
                       {order.status === 'completed' ? 'مكتمل' : order.status === 'pending' ? 'قيد التحضير' : 'ملغي'}
                     </span>
                     <span className="text-[10px] text-gray-400 font-mono mt-0.5">
-                      {(order.items || []).length} أصناف • {order.orderType === 'dine-in' ? `طاولة #${order.tableNumber || 1}` : 'سفري'}
+                      {(order.items || []).length} أصناف • طاولة #{order.tableNumber || '—'}
                     </span>
                   </div>
                 </div>
