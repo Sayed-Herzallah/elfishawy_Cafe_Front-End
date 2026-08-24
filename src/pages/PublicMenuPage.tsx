@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { productService, categoryService } from '../services/catalogService';
+import { publicMenuService } from '../services/catalogService';
 import { Product, Category } from '../types';
 import { Search, SearchX, ArrowLeft, X } from 'lucide-react';
 import { LoadingSkeleton } from '../components/ui/LoadingSkeleton';
@@ -11,19 +11,26 @@ export const PublicMenuPage: React.FC = () => {
   const [activeCategory, setActiveCategory] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  // ✅ حالة خطأ مرئية — كان الفشل صامتاً (Console فقط) والمستخدم يرى قائمة فارغة بلا تفسير
+  const [hasError, setHasError] = useState<boolean>(false);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
         setIsLoading(true);
-        const [prodRes, catRes] = await Promise.all([
-          productService.listProducts(),
-          categoryService.listCategories(),
-        ]);
-        if (prodRes.success && prodRes.data) setProducts(prodRes.data);
-        if (catRes.success && catRes.data) setCategories(catRes.data);
+        setHasError(false);
+        // Endpoint عام (بدون تسجيل دخول) — يقرأ من قاعدة البيانات مباشرة،
+        // فأي منتج يتضاف من لوحة الأدمن يظهر هنا فوراً
+        const res = await publicMenuService.getPublicMenu();
+        if (res.success && res.data) {
+          setProducts(res.data.products || []);
+          setCategories(res.data.categories || []);
+        } else {
+          setHasError(true);
+        }
       } catch (err) {
         console.error('Error fetching public menu', err);
+        setHasError(true);
       } finally {
         setIsLoading(false);
       }
@@ -47,6 +54,41 @@ export const PublicMenuPage: React.FC = () => {
   };
 
   const hasActiveFilter = searchQuery.trim() !== '' || activeCategory !== 'all';
+
+  // بناء كروت المنيو: المنتجات اللي ليها نفس "مجموعة المنيو" بتظهر ككارت واحد والخيارات جواه
+  const menuCards = (() => {
+    const cards: {
+      key: string;
+      title: string;
+      description: string;
+      image: string;
+      inStock: boolean;
+      variants: { _id: string; name: string; price: number; inStock: boolean }[];
+    }[] = [];
+    const groupIndex = new Map<string, number>();
+
+    for (const p of filteredProducts) {
+      const img = p.image?.secure_url || 'https://images.unsplash.com/photo-1514432324607-a09d9b4aefdd?q=80&w=800&auto=format&fit=crop';
+            variant: { _id: p._id, name: p.name, price: p.price, inStock: p.inStock, baseName: p.baseName || "" };
+      const group = (p.baseName || p.name).trim();
+
+      if (group) {
+        const existingIdx = groupIndex.get(group);
+        if (existingIdx !== undefined) {
+          const card = cards[existingIdx];
+          card.variants.push(variant);
+          card.inStock = card.inStock || p.inStock;
+          if (!card.image.startsWith('https://images.unsplash') && p.image?.secure_url) card.image = img;
+        } else {
+          groupIndex.set(group, cards.length);
+          cards.push({ key: `group:${group}`, title: group, description: p.description || '', image: img, inStock: p.inStock, variants: [variant] });
+        }
+      } else {
+        cards.push({ key: `single:${p._id}`, title: p.name, description: p.description || '', image: img, inStock: p.inStock, variants: [variant] });
+      }
+    }
+    return cards;
+  })();
 
   return (
     <div className="min-h-screen bg-[#fcfaf7] text-[#1c1917] pb-24">
@@ -134,7 +176,17 @@ export const PublicMenuPage: React.FC = () => {
          {/* Product Cards Grid */}
          {isLoading ? (
            <LoadingSkeleton type="tile" count={8} />
-         ) : filteredProducts.length === 0 ? (
+         ) : hasError ? (
+            <div className="text-center py-16 bg-white rounded-2xl border border-gray-100 p-8">
+              <div className="w-14 h-14 rounded-2xl bg-rose-50 border border-rose-100 flex items-center justify-center text-rose-500 mx-auto mb-3">
+                <SearchX className="w-6 h-6" />
+              </div>
+              <p className="text-gray-700 font-bold text-sm">تعذر تحميل المنيو حالياً</p>
+              <p className="text-xs text-gray-500 mt-2 max-w-sm mx-auto leading-relaxed">
+                نتواجه مشكلة في الاتصال بالخادم. حاول تحديث الصفحة بعد قليل، أو تفضل بزيارتنا في المقهى.
+              </p>
+            </div>
+          ) : filteredProducts.length === 0 ? (
            <div className="text-center py-16 bg-white rounded-2xl border border-gray-100 p-8">
              <div className="w-14 h-14 rounded-2xl bg-[#2e5b9f]/5 border border-[#2e5b9f]/15 flex items-center justify-center text-[#2e5b9f] mx-auto mb-3">
                 <SearchX className="w-6 h-6" />

@@ -51,7 +51,9 @@ export const CashierInventoryPage: React.FC = () => {
   const [purchaseErrors, setPurchaseErrors] = useState<{ quantity?: string; totalAmount?: string }>({});
 
   const { showToast, showError } = useNotification();
-  const { user } = useAuth();
+  // 🔐 إضافة صنف مخزون جديد صلاحية أدمن في الـ Backend (POST /inventory) —
+  // لا نعرض الزر للكاشير حتى لا يرى إجراءً سيفشل دائماً بخطأ 403
+  const { user, isAdmin } = useAuth();
 
   // Use inventory sync hook with real-time polling
   const { items, lowStockItems, outOfStockItems, isLoading, refetch } = useInventorySync(30000);
@@ -281,17 +283,19 @@ export const CashierInventoryPage: React.FC = () => {
           </p>
         </div>
 
-        <Button
-          onClick={() => {
-            setFormErrors({});
-            setIsAddModalOpen(true);
-          }}
-          variant="primary"
-          leftIcon={<Plus className="w-4 h-4 ml-1.5" />}
-          className="bg-[#2e5b9f] hover:bg-[#244b85]"
-        >
-          إضافة صنف مخزون
-        </Button>
+        {isAdmin && (
+          <Button
+            onClick={() => {
+              setFormErrors({});
+              setIsAddModalOpen(true);
+            }}
+            variant="primary"
+            leftIcon={<Plus className="w-4 h-4 ml-1.5" />}
+            className="bg-[#2e5b9f] hover:bg-[#244b85]"
+          >
+            إضافة صنف مخزون
+          </Button>
+        )}
       </div>
 
       {/* Metric Cards */}
@@ -510,9 +514,9 @@ export const CashierInventoryPage: React.FC = () => {
         )}
       </div>
 
-      {/* Modal: Add New Inventory Item */}
+      {/* Modal: Add New Inventory Item — للأدمن فقط (صلاحية الـ Backend) */}
       <Modal
-        isOpen={isAddModalOpen}
+        isOpen={isAddModalOpen && isAdmin}
         onClose={() => setIsAddModalOpen(false)}
         title="إضافة صنف مخزون جديد"
         maxWidth="md"

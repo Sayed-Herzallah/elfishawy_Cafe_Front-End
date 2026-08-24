@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { analyticsService, orderService, expenseService, inventoryService } from '../../services/opsService';
 import { recipeService } from '../../services/catalogService';
 import { KPIStats, ChartsData, Order, Expense, InventoryItem, ExpenseCategory } from '../../types';
@@ -8,6 +8,7 @@ import { DateRangeFilter, DateRange } from '../../components/ui/DateRangeFilter'
 import { FilterConfig } from '../../components/ui/FilterDialog';
 import { LoadingSpinner } from '../../components/ui/LoadingSpinner';
 import { ExportModal } from '../../components/ui/ExportModal';
+import { usePersistentState, readSessionCache, writeSessionCache } from '../../hooks/usePersistentState';
 import { exportElementToPdf } from '../../utils/pdfExport';
 import { useNotification } from '../../contexts/NotificationContext';
 import { BarChart3, TrendingUp, TrendingDown, DollarSign, Download, Award, AlertCircle, Calendar, PieChart, Medal, Info, X, ReceiptText } from 'lucide-react';
@@ -16,6 +17,8 @@ import {
   useSalesComparison,
   useExpensesComparison,
   useProfitComparison,
+  useExplicitRangeComparison,
+  type ComparisonResult,
   type TimeRange
 } from '../../hooks/useStatisticsComparison';
 
@@ -38,34 +41,161 @@ const EXPENSE_CATEGORY_META: Record<ExpenseCategory, { label: string; color: str
   other: { label: 'أخرى', color: 'bg-gray-400' },
 };
 
+/** 🗂️ فئات فلترة التقارير المالية — أزرار سريعة بدل القائمة المنسدلة */
+const CATEGORY_FILTERS: Array<{ value: 'all' | ExpenseCategory; label: string }> = [
+  { value: 'all', label: 'الكل' },
+  { value: 'inventory', label: '🛒 المشتريات' },
+  { value: 'salaries', label: '👥 الرواتب' },
+  { value: 'utilities', label: '⚡ المرافق' },
+  { value: 'rent', label: '🏠 الإيجار' },
+  { value: 'other', label: '📋 أخرى' },
+];
+
 export const AdminReportsPage: React.FC = () => {
   const { showToast, showError } = useNotification();
+  const REPORTS_CACHE_KEY = 'reports_cache_v1';
   const [stats, setStats] = useState<KPIStats | null>(null);
   const [charts, setCharts] = useState<ChartsData | null>(null);
   const [orders, setOrders] = useState<Order[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
-  const [dateRange, setDateRange] = useState<DateRange>({ from: null, to: null, preset: 'custom' });
-  const [categoryFilter, setCategoryFilter] = useState<string>('all');
+  // ✅ الفلاتر محفوظة — بعد أي Refresh بترجع نفس نطاق التاريخ والفئة المختارين
+  const [dateRange, setDateRange] = usePersistentState<DateRange>('reports_dateRange', { from: null, to: null, preset: 'custom' });
+  const [categoryFilter, setCategoryFilter] = usePersistentState<string>('reports_categoryFilter', 'all');
   const [isExportModalOpen, setIsExportModalOpen] = useState<boolean>(false);
   const [isExportingPdf, setIsExportingPdf] = useState<boolean>(false);
   /** productId → estimated cost per unit, derived from active recipes + inventory cost prices */
   const [unitCostMap, setUnitCostMap] = useState<Map<string, number>>(new Map());
+  // ✅ كاش الجلسة — الصفحة تظهر فورًا بآخر داتا بعد Refresh بدل شاشة تحميل فاضية
+  const [isLoading, setIsLoading] = useState<boolean>(!readSessionCache<any>(REPORTS_CACHE_KEY));
   const contentRef = useRef<HTMLDivElement>(null);
 
-  // Comparison hooks — تحويل النطاق المختار إلى فترة قابلة للمقارنة
-  const comparisonTimeRange: TimeRange =
-    dateRange.preset === 'today' || dateRange.preset === 'yesterday'
-      ? 'today'
-      : dateRange.preset === 'week'
-        ? 'week'
-        : dateRange.preset === 'year'
-          ? 'year'
-          : 'month';
+  // ✅ فلترة التاريخ — بتشتغل على الطلبات والمصروفات بأي نطاق يختاره المستخدم
+  // (متنقلة فوق early-return بتاع الـ loading عشان تتفلتر قبل عرض أي حاجة)
+  const filteredOrders = orders.filter((o) => {
+    if (!o || typeof o !== 'object') return false;
+    const orderDate = new Date(o.createdAt);
 
-  const salesComparison = useSalesComparison(comparisonTimeRange, orders);
-  const expensesComparison = useExpensesComparison(comparisonTimeRange, expenses);
-  const profitComparison = useProfitComparison(comparisonTimeRange, orders, expenses);
+    if (dateRange.from) {
+      const from = new Date(dateRange.from);
+      from.setHours(0, 0, 0, 0);
+      if (orderDate < from) return false;
+    }
+    if (dateRange.to) {
+      const to = new Date(dateRange.to);
+      to.setHours(23, 59, 59, 999);
+      if (orderDate > to) return false;
+    }
+    return true;
+  });
+
+  // Filter expenses by date + category
+  const filteredExpenses = expenses.filter((e) => {
+    if (!e || typeof e !== 'object') return false;
+    const expDate = new Date(e.date || e.createdAt || '');
+
+    if (dateRange.from) {
+      const from = new Date(dateRange.from);
+      from.setHours(0, 0, 0, 0);
+      if (expDate < from) return false;
+    }
+    if (dateRange.to) {
+      const to = new Date(dateRange.to);
+      to.setHours(23, 59, 59, 999);
+      if (expDate > to) return false;
+    }
+
+    const matchesCategory =
+      !categoryFilter || categoryFilter === 'all'
+        ? true
+        : e.category === categoryFilter;
+
+    return matchesCategory;
+  });
+
+  // المصروفات المفلترة بالتاريخ فقط (من غير الفئة) — عشان عدّادات أزرار الفئة تفضل ثابتة
+  const dateFilteredExpenses = expenses.filter((e) => {
+    if (!e || typeof e !== 'object') return false;
+    const expDate = new Date(e.date || e.createdAt || '');
+
+    if (dateRange.from) {
+      const from = new Date(dateRange.from);
+      from.setHours(0, 0, 0, 0);
+      if (expDate < from) return false;
+    }
+    if (dateRange.to) {
+      const to = new Date(dateRange.to);
+      to.setHours(23, 59, 59, 999);
+      if (expDate > to) return false;
+    }
+    return true;
+  });
+
+  // ✅ المقارنات مبنية على النطاق المحدد فعلاً:
+  // لو فيه تاريخ محدد (اختصار أو مخصص) → مقارنة بنافذة بنفس الطول قبله مباشرة
+  // عشان كروت المؤشرات تطابق الفترة المفلترة بالظبط (كان ده سبب إن الفلترة "مش شغالة").
+  // ولو مفيش تاريخ محدد → مقارنات الشهر الحالي كافتراضي.
+  const hasExplicitRange = Boolean(dateRange.from && dateRange.to);
+
+  // ✅ تطبيع حدود النطاق: البداية أول اليوم والنهاية آخر اليوم — عشان اختيار يوم من التقويم
+  // ميبقاش نصفه مخفي (النهاية كانت ممكن تيجي منتصف الليل وتستبعد حركات اليوم نفسه)
+  const explicitFrom = dateRange.from
+    ? new Date(new Date(dateRange.from).setHours(0, 0, 0, 0))
+    : new Date(0);
+  const explicitTo = dateRange.to
+    ? new Date(new Date(dateRange.to).setHours(23, 59, 59, 999))
+    : new Date(86400000);
+
+  const completedOrders = useMemo(
+    () => orders.filter((o) => o && o.status === 'completed'),
+    [orders]
+  );
+
+  const explicitSalesComparison = useExplicitRangeComparison(
+    completedOrders,
+    (o) => Number(o.totalAmount) || 0,
+    explicitFrom,
+    explicitTo
+  );
+  const explicitExpensesComparison = useExplicitRangeComparison(
+    expenses,
+    (e) => Number(e.amount) || 0,
+    explicitFrom,
+    explicitTo
+  );
+
+  /** دمج مبيعات ومصروفات نطاق صريح في مقارنة صافي ربح واحدة */
+  const combineProfitComparison = (
+    sales: ComparisonResult,
+    exp: ComparisonResult
+  ): ComparisonResult => {
+    const current = sales.current - exp.current;
+    const previous = sales.previous - exp.previous;
+    const changeAbsolute = current - previous;
+    const changePercent =
+      previous === 0 ? (current > 0 ? 100 : 0) : Math.round((changeAbsolute / Math.abs(previous)) * 100);
+    return {
+      current,
+      previous,
+      changePercent,
+      changeAbsolute,
+      trend: changePercent > 0 ? 'up' : changePercent < 0 ? 'down' : 'neutral',
+      previousPeriodLabel: sales.previousPeriodLabel,
+      currentPeriodLabel: sales.currentPeriodLabel,
+    };
+  };
+
+  // Comparison hooks — تحويل النطاق المختار إلى فترة قابلة للمقارنة (احتياطي لما مفيش تاريخ محدد)
+  const comparisonTimeRange: TimeRange = 'month';
+
+  const presetSalesComparison = useSalesComparison(comparisonTimeRange, orders);
+  const presetExpensesComparison = useExpensesComparison(comparisonTimeRange, expenses);
+  const presetProfitComparison = useProfitComparison(comparisonTimeRange, orders, expenses);
+
+  const salesComparison = hasExplicitRange ? explicitSalesComparison : presetSalesComparison;
+  const expensesComparison = hasExplicitRange ? explicitExpensesComparison : presetExpensesComparison;
+  const profitComparison = hasExplicitRange
+    ? combineProfitComparison(explicitSalesComparison, explicitExpensesComparison)
+    : presetProfitComparison;
 
   useEffect(() => {
     const loadReports = async () => {
@@ -104,12 +234,35 @@ export const AdminReportsPage: React.FC = () => {
         } catch (costErr) {
           console.warn('Cost estimation skipped:', costErr);
         }
+
+        // ✅ حفظ آخر داتا ناجحة — بعد أي Refresh الصفحة تظهر فورًا بيها
+        writeSessionCache(REPORTS_CACHE_KEY, {
+          savedAt: Date.now(),
+          stats: statsRes?.success ? statsRes.data : null,
+          charts: chartsRes?.success ? chartsRes.data : null,
+          orders: ordersRes?.success ? ordersRes.data : null,
+          expenses: expRes?.success ? expRes.data : null,
+        });
       } catch (err) {
         console.error('Error loading reports', err);
       } finally {
         setIsLoading(false);
       }
     };
+
+    // ✅ استرجاع فوري من كاش الجلسة — التقارير تظهر بآخر داتا بدون شاشة تحميل فاضية
+    try {
+      const cached = readSessionCache<any>(REPORTS_CACHE_KEY);
+      if (cached) {
+        if (cached.stats) setStats(cached.stats);
+        if (cached.charts) setCharts(cached.charts);
+        if (Array.isArray(cached.orders)) setOrders(cached.orders);
+        if (Array.isArray(cached.expenses)) setExpenses(cached.expenses);
+      }
+    } catch {
+      /* تجاهل — الكاش تحسيني */
+    }
+
     loadReports();
   }, []);
 
@@ -117,47 +270,9 @@ export const AdminReportsPage: React.FC = () => {
     return <LoadingSpinner text="جاري تجهيز التقارير المالية..." />;
   }
 
-  // Filter orders by date — using new DateRangeFilter
-  const filteredOrders = orders.filter((o) => {
-    if (!o || typeof o !== 'object') return false;
-    const orderDate = new Date(o.createdAt);
-    
-    if (dateRange.from) {
-      const from = new Date(dateRange.from);
-      from.setHours(0, 0, 0, 0);
-      if (orderDate < from) return false;
-    }
-    if (dateRange.to) {
-      const to = new Date(dateRange.to);
-      to.setHours(23, 59, 59, 999);
-      if (orderDate > to) return false;
-    }
-    return true;
-  });
+  // ملاحظة: فلترة التاريخ والفئة (filteredOrders / filteredExpenses) متعرّفة فوق
+  // قبل early-return بتاع الـ loading — عشان المقارنات والفلاتر تشتغل على كل render.
 
-  // Filter expenses by date + category
-  const filteredExpenses = expenses.filter((e) => {
-    if (!e || typeof e !== 'object') return false;
-    const expDate = new Date(e.date || e.createdAt || '');
-    
-    if (dateRange.from) {
-      const from = new Date(dateRange.from);
-      from.setHours(0, 0, 0, 0);
-      if (expDate < from) return false;
-    }
-    if (dateRange.to) {
-      const to = new Date(dateRange.to);
-      to.setHours(23, 59, 59, 999);
-      if (expDate > to) return false;
-    }
-
-    const matchesCategory =
-      !categoryFilter || categoryFilter === 'all'
-        ? true
-        : e.category === categoryFilter;
-
-    return matchesCategory;
-  });
 
   // عدد الفلاتر النشطة (شارة على زرار الفلتر)
   const activeFiltersCount =
@@ -321,30 +436,64 @@ export const AdminReportsPage: React.FC = () => {
       </div>
        
       {/* Filter Bar */}
-      <div className="bg-white rounded-2xl border border-gray-200/80 p-4 shadow-2xs flex flex-col sm:flex-row items-center justify-between gap-3 text-right text-gray-900">
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
-          <DateRangeFilter
-            value={dateRange}
-            onChange={setDateRange}
-            maxDate={new Date()}
-            showPresets={true}
-            className="min-w-[220px]"
-          />
-          {activeFiltersCount > 0 && (
-            <button
-              onClick={handleFilterReset}
-              className="inline-flex items-center gap-1 py-1.5 px-2.5 rounded-xl text-xs font-bold text-rose-600 bg-rose-50 border border-rose-200 hover:bg-rose-100 transition cursor-pointer whitespace-nowrap"
-              title="مسح الفلاتر"
-            >
-              <X className="w-3.5 h-3.5" />
-              مسح
-            </button>
-          )}
+      <div className="bg-white rounded-2xl border border-gray-200/80 p-4 shadow-2xs flex flex-col gap-3 text-right text-gray-900">
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 w-full sm:w-auto">
+            <DateRangeFilter
+              value={dateRange}
+              onChange={setDateRange}
+              maxDate={new Date()}
+              showPresets={true}
+              className="min-w-[220px]"
+            />
+            {activeFiltersCount > 0 && (
+              <button
+                onClick={handleFilterReset}
+                className="inline-flex items-center gap-1 py-1.5 px-2.5 rounded-xl text-xs font-bold text-rose-600 bg-rose-50 border border-rose-200 hover:bg-rose-100 transition cursor-pointer whitespace-nowrap"
+                title="مسح الفلاتر"
+              >
+                <X className="w-3.5 h-3.5" />
+                مسح
+              </button>
+            )}
+          </div>
+
+          <span className="text-xs font-mono font-bold text-gray-500 whitespace-nowrap">
+            {formatNumber(filteredOrders.length)} طلب • {formatNumber(filteredExpenses.length)} مصروف
+          </span>
         </div>
 
-        <span className="text-xs font-mono font-bold text-gray-500">
-          {formatNumber(filteredOrders.length)} طلب • {formatNumber(filteredExpenses.length)} مصروف
-        </span>
+        {/* 🗂️ فلترة الفئة — أزرار سريعة بدل القائمة المنسدلة: بتفلتر المصروفات والتقارير المرتبطة بيها */}
+        <div className="flex flex-wrap items-center gap-1.5 pt-3 border-t border-gray-100 text-xs">
+          <span className="text-[11px] font-bold text-gray-500 ml-1">الفئة:</span>
+          {CATEGORY_FILTERS.map(({ value, label }) => {
+            const isActive = categoryFilter === value;
+            const count =
+              value === 'all'
+                ? dateFilteredExpenses.length
+                : dateFilteredExpenses.filter((e) => e.category === value).length;
+            return (
+              <button
+                key={value}
+                onClick={() => setCategoryFilter(value)}
+                className={`inline-flex items-center gap-1.5 py-1.5 px-3 rounded-xl font-bold transition cursor-pointer whitespace-nowrap border ${
+                  isActive
+                    ? 'bg-[#2e5b9f] text-white border-[#2e5b9f] shadow-sm'
+                    : 'bg-white text-gray-600 border-gray-200 hover:bg-[#faf8f5] hover:border-gray-300'
+                }`}
+              >
+                {label}
+                <span
+                  className={`font-mono text-[10px] px-1.5 py-px rounded-full ${
+                    isActive ? 'bg-white/20 text-white' : 'bg-black/5 text-gray-500'
+                  }`}
+                >
+                  {formatNumber(count)}
+                </span>
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {/* KPI Cards */}

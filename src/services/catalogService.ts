@@ -59,6 +59,15 @@ export const productService = {
   },
 };
 
+// المنيو العام: endpoint مفتوح للزوار (بدون تسجيل دخول) — بيرجّع البيانات الآمنة فقط
+export const publicMenuService = {
+  getPublicMenu: (): Promise<ApiResponse<{ products: Product[]; categories: Category[] }>> => {
+    return ApiClient.request<{ products: Product[]; categories: Category[] }>('/products/public/menu', {
+      method: 'GET',
+    });
+  },
+};
+
 export const recipeService = {
   listRecipes: (): Promise<ApiResponse<Recipe[]>> => {
     return ApiClient.request<Recipe[]>('/recipes', { method: 'GET' });

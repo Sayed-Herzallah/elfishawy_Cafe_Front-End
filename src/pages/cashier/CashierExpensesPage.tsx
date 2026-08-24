@@ -89,7 +89,11 @@ export const CashierExpensesPage: React.FC = () => {
         inventoryService.listInventory(),
       ]);
 
-      if (expRes.success && expRes.data) setExpenses(expRes.data);
+      // 🔐 حماية إضافية في الواجهة: الكاشير يرى قيود المشتريات (المواد الخام) فقط —
+      // أي تصنيف مصروفات آخر (إيجار، رواتب، مرافق...) لا يُعرض مهما كانت استجابة الـ API
+      if (expRes.success && expRes.data) {
+        setExpenses(expRes.data.filter((e) => e.category === 'inventory'));
+      }
       if (invRes.success && invRes.data) {
         const invData = invRes.data;
         setInventoryItems(invData);
@@ -233,10 +237,7 @@ export const CashierExpensesPage: React.FC = () => {
 
   const CATEGORY_LABELS: Record<string, { label: string; classes: string }> = {
     inventory: { label: 'مشتريات مخزون', classes: 'bg-rose-50 text-rose-700 border-rose-200/60' },
-    utilities: { label: 'مرافق', classes: 'bg-cyan-50 text-cyan-700 border-cyan-200/60' },
-    salaries: { label: 'رواتب', classes: 'bg-blue-50 text-blue-700 border-blue-200/60' },
-    rent: { label: 'إيجار', classes: 'bg-purple-50 text-purple-700 border-purple-200/60' },
-    other: { label: 'أخرى', classes: 'bg-gray-100 text-gray-600 border-gray-200' },
+    // 🔐 شاشة الكاشير للمشتريات فقط — لا توجد فئات مصروفات (إيجار/رواتب/مرافق) هنا
   };
 
   const filteredExpenses = useMemo(() => {
@@ -381,10 +382,10 @@ export const CashierExpensesPage: React.FC = () => {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-gray-200/70">
         <div>
           <h1 className="text-lg font-bold font-arabic-heading text-gray-900">
-            مشتريات البضاعة والتشغيل
+            مشتريات المواد الخام
           </h1>
           <p className="text-xs text-gray-500 mt-0.5">
-            تسجيل فواتير شراء مستلزمات المقهى وزيادة رصيد المخزن تلقائياً.
+            تسجيل فواتير شراء المواد الخام وزيادة رصيد المخزن تلقائياً — مع سجل مشتريات المدير والكاشير.
           </p>
         </div>
 
@@ -630,7 +631,7 @@ export const CashierExpensesPage: React.FC = () => {
                     const unitPrice = exp.inventoryQuantityAdded
                       ? Number(exp.amount) / Number(exp.inventoryQuantityAdded)
                       : 0;
-                    const catMeta = CATEGORY_LABELS[exp.category] || CATEGORY_LABELS.other;
+                    const catMeta = CATEGORY_LABELS[exp.category] || { label: 'مشتريات مخزون', classes: 'bg-rose-50 text-rose-700 border-rose-200/60' };
                     return (
                     <tr key={exp._id} className="hover:bg-[#faf8f5]/80 transition">
                       <td className="py-3.5 px-3 min-w-[160px]">

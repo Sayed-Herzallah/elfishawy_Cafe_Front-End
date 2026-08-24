@@ -27,6 +27,7 @@ import {
   useExplicitRangeComparison,
   type ComparisonResult
 } from '../../hooks/useStatisticsComparison';
+import { usePersistentState, readSessionCache, writeSessionCache } from '../../hooks/usePersistentState';
 import {
   TrendingUp,
   TrendingDown,
@@ -48,6 +49,7 @@ export const AdminDashboardPage: React.FC = () => {
   const { user } = useAuth();
   const { showToast, showError } = useNotification();
   const navigate = useNavigate();
+  const DASH_CACHE_KEY = 'dash_cache_v1';
   const [stats, setStats] = useState<KPIStats | null>(null);
   const [charts, setCharts] = useState<ChartsData | null>(null);
   const [allOrders, setAllOrders] = useState<Order[]>([]);
@@ -57,9 +59,11 @@ export const AdminDashboardPage: React.FC = () => {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [allProducts, setAllProducts] = useState<Product[]>([]);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
-  const [timeRange, setTimeRange] = useState<'today' | 'week' | 'month' | 'year'>('today');
-  const [dateRange, setDateRange] = useState<DateRange>({ from: null, to: null, preset: 'custom' });
-  const [isLoading, setIsLoading] = useState<boolean>(true);
+  // ✅ الفلاتر محفوظة في localStorage — بعد أي Refresh بترجع نفس الفترة اللي كانت مختارة
+  const [timeRange, setTimeRange] = usePersistentState<'today' | 'week' | 'month' | 'year'>('dash_timeRange', 'today');
+  const [dateRange, setDateRange] = usePersistentState<DateRange>('dash_dateRange', { from: null, to: null, preset: 'custom' });
+  // ✅ لو فيه كاش من آخر مرة، نبدأ بعرضه فورًا بدون سكيليتون فاضي (التحديث الصامت هيجي بعدها)
+  const [isLoading, setIsLoading] = useState<boolean>(!readSessionCache<any>(DASH_CACHE_KEY));
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [isExportModalOpen, setIsExportModalOpen] = useState<boolean>(false);
   // مرجع لمحتوى التقرير عشان تصدير الـ PDF
@@ -91,6 +95,17 @@ export const AdminDashboardPage: React.FC = () => {
       }
       if (expRes.success && expRes.data) setExpenses(expRes.data);
       if (prodRes?.success && prodRes.data) setAllProducts(prodRes.data);
+
+      // ✅ حفظ آخر داتا ناجحة في كاش الجلسة — بعد أي Refresh الصفحة تظهر فورًا بيها
+      writeSessionCache(DASH_CACHE_KEY, {
+        savedAt: Date.now(),
+        stats: statsRes.success ? statsRes.data : null,
+        charts: chartsRes.success ? chartsRes.data : null,
+        orders: ordersRes.success ? ordersRes.data : null,
+        inventory: invRes.success ? invRes.data : null,
+        expenses: expRes.success ? expRes.data : null,
+        products: prodRes?.success ? prodRes.data : null,
+      });
     } catch (err) {
       console.error('Failed to load dashboard metrics', err);
       // اعرض الخطأ للمستخدم بدل الهياكل المعلقة بصمت
@@ -102,6 +117,27 @@ export const AdminDashboardPage: React.FC = () => {
   };
 
   useEffect(() => {
+    // ✅ استرجاع فوري من كاش الجلسة — الداشبورد يظهر بآخر داتا معروفة بدون وميض تحميل
+    try {
+      const cached = readSessionCache<any>(DASH_CACHE_KEY);
+      if (cached) {
+        if (cached.stats) setStats(cached.stats);
+        if (cached.charts) setCharts(cached.charts);
+        if (Array.isArray(cached.orders)) {
+          setAllOrders(cached.orders);
+          setRecentOrders(cached.orders.slice(0, 6));
+        }
+        if (Array.isArray(cached.inventory)) {
+          setAllInventory(cached.inventory);
+          setLowStockItems(cached.inventory.filter((i: InventoryItem) => i.quantity <= i.minLimit));
+        }
+        if (Array.isArray(cached.expenses)) setExpenses(cached.expenses);
+        if (Array.isArray(cached.products)) setAllProducts(cached.products);
+      }
+    } catch {
+      /* تجاهل — الكاش تحسيني */
+    }
+
     fetchData();
     // ⚡ تحديث ديناميكي تلقائي كل دقيقة عندما تكون الصفحة ظاهرة (بدون وميض التحميل)
     const interval = setInterval(() => {
@@ -399,7 +435,15 @@ export const AdminDashboardPage: React.FC = () => {
 
         const s = weekOrders.reduce((sum, o) => sum + o.totalAmount, 0);
         const ords = weekOrders.length;
-        const exp = Math.round(totalExpenses / 4);
+        // ✅ مصروفات كل أسبوع من تواريخ المصروفات الفعلية — بدل توزيع الإجمالي بالتساوي (بيانات مختلقة)
+        const exp = Math.round(
+          expenses
+            .filter((e) => {
+              const day = new Date(e.date || e.createdAt || '').getDate();
+              return day >= idx * 7 + 1 && day <= (idx + 1) * 7;
+            })
+            .reduce((sum, e) => sum + e.amount, 0)
+        );
         return {
           label: w,
           sales: s,
@@ -410,31 +454,39 @@ export const AdminDashboardPage: React.FC = () => {
       });
     }
 
-    // Year (12 months)
-    const months = [
-      'سبتمبر 2025', 'أكتوبر 2025', 'نوفمبر 2025', 'ديسمبر 2025',
-      'يناير 2026', 'فبراير 2026', 'مارس 2026', 'أبريل 2026',
-      'مايو 2026', 'يونيو 2026', 'يوليو 2026', 'أغسطس 2026'
-    ];
+    // Year (آخر 12 شهر) — ✅ تسميات ديناميكية وبيانات حقيقية فقط بدون أي تعبئة تقديرية
+    const monthNames = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
+    const last12Months: { label: string; year: number; month: number }[] = [];
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      last12Months.push({ label: `${monthNames[d.getMonth()]} ${d.getFullYear()}`, year: d.getFullYear(), month: d.getMonth() });
+    }
 
-    return months.map((m, idx) => {
+    return last12Months.map(({ label, year, month }) => {
       const monthOrders = allOrders.filter((o) => {
         const d = new Date(o.createdAt);
-        return d.getMonth() === (idx + 8) % 12;
+        return o.status === 'completed' && d.getFullYear() === year && d.getMonth() === month;
       });
 
-      const s = monthOrders.reduce((sum, o) => sum + o.totalAmount, 0) || (idx >= 7 ? totalSales / 5 : 0);
-      const ords = monthOrders.length || (idx >= 7 ? Math.round(ordersCount / 5) : 0);
-      const exp = Math.round(totalExpenses / 12);
+      const s = monthOrders.reduce((sum, o) => sum + o.totalAmount, 0);
+      const ords = monthOrders.length;
+      const exp = Math.round(
+        expenses
+          .filter((e) => {
+            const d = new Date(e.date || e.createdAt || '');
+            return d.getFullYear() === year && d.getMonth() === month;
+          })
+          .reduce((sum, e) => sum + e.amount, 0)
+      );
       return {
-        label: m,
+        label,
         sales: Math.round(s),
         orders: ords,
         expenses: exp,
         profit: Math.max(0, Math.round(s - exp)),
       };
     });
-  }, [timeRange, filteredOrders, allOrders, expenses, totalSales, totalExpenses, ordersCount]);
+  }, [timeRange, filteredOrders, allOrders, expenses]);
 
   // Top products
   // ⚠️ حماية من البيانات الناقصة: منتج محذوف (null) أو items ناقصة كانت بتعمل

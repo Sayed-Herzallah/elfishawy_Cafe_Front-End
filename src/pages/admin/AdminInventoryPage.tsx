@@ -548,24 +548,22 @@ return (
                             {formatNumber(item.quantity)} {item.unit}
                           </span>
                         </div>
-                        <div className="text-left">
-                          <span className="text-[10px] text-gray-400 block mb-0.5">متوسط سعر الوحدة</span>
-                          <span className="font-bold text-gray-900 font-mono">
-                            {costInfo.unit > 0 ? formatPrice(costInfo.unit) : '—'}
-                            {costInfo.unit > 0 ? <span className="text-gray-400 text-[10px]"> / {item.unit}</span> : null}
-                          </span>
-                        </div>
-                        <div className="text-left">
-                          <span className="text-[10px] text-gray-400 block mb-0.5">التكلفة الإجمالية</span>
-                          <span className={`font-bold font-mono ${costInfo.total > 0 ? 'text-[#2e5b9f]' : 'text-gray-300'}`}>
-                            {costInfo.total > 0 ? formatPrice(costInfo.total) : '—'}
-                          </span>
-                        </div>
                         <div>
                           <span className="text-[10px] text-gray-400 block mb-0.5">حد الأمان</span>
                           <span className="font-bold text-gray-700 font-mono text-sm">
                             {formatNumber(item.minLimit)} {item.unit}
                           </span>
+                        </div>
+                        <div className="col-span-2 text-left">
+                          <span className="text-[10px] text-gray-400 block mb-0.5">التكلفة الإجمالية المستثمرة</span>
+                          <span className={`font-bold font-mono ${costInfo.total > 0 ? 'text-[#2e5b9f]' : 'text-gray-300'}`}>
+                            {costInfo.total > 0 ? formatPrice(costInfo.total) : '—'}
+                          </span>
+                          {costInfo.hasPurchases && (
+                            <span className="text-[10px] text-gray-400 font-sans block">
+                              {formatNumber(costInfo.count)} فاتورة شراء • {formatNumber(costInfo.qty)} {item.unit}
+                            </span>
+                          )}
                         </div>
                       </div>
 
@@ -630,12 +628,11 @@ return (
 
               {/* Desktop Table Layout (>= md) */}
               <div className="hidden md:block overflow-x-auto -mx-6 px-6 pb-2">
-                <table className="w-full text-right border-collapse text-xs min-w-[920px]">
+                <table className="w-full text-right border-collapse text-xs min-w-[760px]">
                   <thead>
                     <tr className="border-b border-gray-100 text-gray-400 font-semibold">
                       <th className="pb-3 px-3">اسم المادة / الصنف</th>
                       <th className="pb-3 px-3">الكمية الحالية</th>
-                      <th className="pb-3 px-3">متوسط سعر الوحدة</th>
                       <th className="pb-3 px-3">التكلفة الإجمالية</th>
                       <th className="pb-3 px-3">حد الأمان</th>
                       <th className="pb-3 px-3">آخر توريد</th>
@@ -666,13 +663,8 @@ return (
                             )}
                           </td>
 
-                          <td className="py-3.5 px-3 font-mono font-bold text-sm text-gray-900 whitespace-nowrap">
-                            {formatNumber(item.quantity)} {item.unit}
-                          </td>
-
                           <td className="py-3.5 px-3 font-mono text-xs text-gray-700 whitespace-nowrap">
-                            {costInfo.unit > 0 ? formatPrice(costInfo.unit) : '—'}
-                            {costInfo.unit > 0 ? <span className="text-gray-400 text-[10px]"> / {item.unit}</span> : null}
+                            {formatNumber(item.quantity)} {item.unit}
                           </td>
 
                           <td className="py-3.5 px-3 font-mono text-[#2e5b9f] font-bold text-sm whitespace-nowrap">
@@ -1009,19 +1001,19 @@ return (
         isOpen={!!viewingItem}
         onClose={() => setViewingItem(null)}
         title={`تفاصيل الصنف: ${viewingItem?.name || ''}`}
-        maxWidth="md"
+        maxWidth="lg"
       >
         {viewingItem && (
-          <div className="space-y-4 text-right">
+          <div className="space-y-4 text-right min-w-0">
             <div className="flex items-center gap-4 p-4 bg-[#faf8f5] rounded-2xl border border-gray-100">
-              <Boxes className="w-10 h-10 rounded-xl bg-[#2e5b9f] text-white flex items-center justify-center" />
-              <div>
-                <h3 className="text-lg font-bold text-gray-900">{viewingItem.name}</h3>
+              <Boxes className="w-10 h-10 rounded-xl bg-[#2e5b9f] text-white flex items-center justify-center shrink-0" />
+              <div className="min-w-0">
+                <h3 className="text-lg font-bold text-gray-900 break-words">{viewingItem.name}</h3>
                 <p className="text-xs text-gray-500 mt-1">صنف مخزون</p>
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="p-3 bg-white rounded-xl border border-gray-200">
                 <span className="text-[10px] text-gray-400 font-bold block">الكمية الحالية</span>
                 <span className="text-lg font-bold font-mono text-[#2e5b9f]">{formatNumber(viewingItem.quantity)} {viewingItem.unit}</span>
@@ -1040,47 +1032,41 @@ return (
                 </Badge>
               </div>
               <div className="p-3 bg-white rounded-xl border border-gray-200">
-                <span className="text-[10px] text-gray-400 font-bold block">آخر توريد</span>
-                <span className="text-xs font-bold font-mono text-gray-900 whitespace-nowrap">{viewingItem.lastRestocked ? formatDateTime(viewingItem.lastRestocked) : '—'}</span>
-              </div>
-              <div className="p-3 bg-white rounded-xl border border-gray-200">
                 <span className="text-[10px] text-gray-400 font-bold block">تم التوريد بواسطة</span>
-                <span className="text-sm font-bold text-gray-900">
+                <span className="text-sm font-bold text-gray-900 break-words">
                   {resolveRestockerName(viewingItem) || '—'}
                 </span>
               </div>
-              <div className="p-3 bg-white rounded-xl border border-gray-200">
-                <span className="text-[10px] text-gray-400 font-bold block">متوسط سعر الوحدة</span>
-                <span className="text-lg font-bold font-mono text-gray-900 whitespace-nowrap">
-                  {costSummaryFor(viewingItem).unit > 0 ? formatPrice(costSummaryFor(viewingItem).unit) : '—'}
-                  {costSummaryFor(viewingItem).unit > 0 ? <span className="text-xs text-gray-400 font-sans"> / {viewingItem.unit}</span> : null}
-                </span>
-                {costSummaryFor(viewingItem).hasPurchases && (
-                  <span className="text-[10px] text-emerald-700 font-bold block mt-1">من Σ فواتير الشراء الفعلية</span>
-                )}
-              </div>
-              <div className="p-3 bg-white rounded-xl border border-gray-200">
-                <span className="text-[10px] text-gray-400 font-bold block">التكلفة الإجمالية (المستثمرة)</span>
-                <span className="text-lg font-bold font-mono text-[#2e5b9f] whitespace-nowrap">
-                  {costSummaryFor(viewingItem).total > 0 ? formatPrice(costSummaryFor(viewingItem).total) : '—'}
-                </span>
-                <span className="text-[10px] text-gray-400 block mt-1">إجمالي ما تم دفعه لشراء هذا الصنف</span>
-              </div>
-              <div className="p-3 bg-white rounded-xl border border-gray-200">
-                <span className="text-[10px] text-gray-400 font-bold block">الكمية المشتراة / مرات الشراء</span>
-                <span className="text-sm font-bold font-mono text-gray-900 whitespace-nowrap">
-                  {costSummaryFor(viewingItem).hasPurchases
-                    ? `${formatNumber(costSummaryFor(viewingItem).qty)} ${viewingItem.unit} (${formatNumber(costSummaryFor(viewingItem).count)} مرة)`
-                    : '—'}
-                </span>
-              </div>
 
+              {/* 💰 بطاقة التكلفة الإجمالية — إجمالي كل فواتير الشراء الفعلية للصنف */}
+              <div className="sm:col-span-2 p-4 bg-[#2e5b9f]/5 rounded-xl border border-[#2e5b9f]/20 flex items-center justify-between gap-3 flex-wrap">
+                <div className="min-w-0">
+                  <span className="text-[10px] text-gray-500 font-bold block">التكلفة الإجمالية المستثمرة</span>
+                  <span className="text-xl font-bold font-mono text-[#2e5b9f]">
+                    {costSummaryFor(viewingItem).total > 0 ? formatPrice(costSummaryFor(viewingItem).total) : '—'}
+                  </span>
+                  <span className="text-[10px] text-gray-400 block mt-0.5">إجمالي ما تم دفعه فعلاً لشراء هذا الصنف</span>
+                </div>
+                <div className="text-left shrink-0">
+                  <span className="text-[10px] text-gray-500 font-bold block">الكمية المشتراة / مرات الشراء</span>
+                  <span className="text-sm font-bold font-mono text-gray-900 whitespace-nowrap">
+                    {costSummaryFor(viewingItem).hasPurchases
+                      ? `${formatNumber(costSummaryFor(viewingItem).qty)} ${viewingItem.unit}`
+                      : '—'}
+                  </span>
+                  {costSummaryFor(viewingItem).hasPurchases && (
+                    <span className="text-[10px] text-gray-400 font-sans block mt-0.5">
+                      {formatNumber(costSummaryFor(viewingItem).count)} فاتورة شراء
+                    </span>
+                  )}
+                </div>
+              </div>
               {/* 📈 تاريخ الأسعار والتوريد — كل توريد بسعره وتاريخه ومين اللي ورّد (سعر قديم ← سعر جديد) */}
               {(() => {
                 const history = mergeRestockHistory(viewingItem._id, purchaseLogs).slice(0, 8);
                 if (history.length === 0) return null;
                 return (
-                  <div className="col-span-2 space-y-1.5">
+                  <div className="sm:col-span-2 space-y-2 min-w-0">
                     <span className="text-[10px] text-gray-400 font-bold block">
                       📈 تاريخ الأسعار والتوريد ({formatNumber(history.length)} توريد)
                     </span>
@@ -1091,18 +1077,19 @@ return (
                         older?.unitCost !== undefined &&
                         Math.abs(entry.unitCost - older.unitCost) > 0.009;
                       return (
-                        <div key={entry.id} className="bg-white border border-gray-200 rounded-lg px-2.5 py-2 space-y-1">
-                          <div className="flex items-center justify-between gap-2 text-xs">
-                            <span className="font-bold text-gray-900 truncate">
+                        <div key={entry.id} className="bg-white border border-gray-200 rounded-xl px-3 py-2.5 space-y-1.5 min-w-0">
+                          {/* السطر ١: نوع العملية + التاريخ */}
+                          <div className="flex items-start justify-between gap-2 flex-wrap text-xs">
+                            <span className="font-bold text-gray-900 min-w-0">
                               ✅ توريد <span className="font-mono text-emerald-700">+{formatNumber(entry.qty)}</span> {viewingItem.unit}
-                              {entry.supplier && <span className="text-gray-500 font-normal"> — مورد: {entry.supplier}</span>}
                             </span>
-                            <span className="shrink-0 font-mono text-[10px] text-gray-500 whitespace-nowrap">
+                            <span className="font-mono text-[10px] text-gray-500 whitespace-nowrap">
                               {formatDateTime(new Date(entry.dateMs))}
                             </span>
                           </div>
-                          <div className="flex items-center justify-between gap-2 text-[10px]">
-                            <span className="font-mono text-gray-600 whitespace-nowrap">
+                          {/* السطر ٢: سعر الوحدة + إجمالي الفاتورة */}
+                          <div className="flex items-center gap-x-4 gap-y-1 flex-wrap font-mono text-[11px]">
+                            <span className="text-gray-600 whitespace-nowrap">
                               سعر الوحدة:{' '}
                               <span className="font-bold text-[#2e5b9f]">{entry.unitCost !== undefined ? formatPrice(entry.unitCost) : '—'}</span>
                               {priceChanged && (
@@ -1110,15 +1097,18 @@ return (
                                   {' '}(بدلاً من {formatPrice(older!.unitCost!)})
                                 </span>
                               )}
-                              {entry.totalCost !== undefined && (
-                                <span className="text-gray-400"> • إجمالي {formatPrice(entry.totalCost)}</span>
-                              )}
                             </span>
-                            <span className="shrink-0 text-gray-500 whitespace-nowrap">
-                              بواسطة <span className="font-bold text-gray-800">{entry.by}</span>
+                            {entry.totalCost !== undefined && (
+                              <span className="text-gray-500 whitespace-nowrap">إجمالي الفاتورة {formatPrice(entry.totalCost)}</span>
+                            )}
+                          </div>
+                          {/* السطر ٣: بواسطة + المورد */}
+                          <div className="flex items-center justify-between gap-2 flex-wrap text-[10px] text-gray-500">
+                            <span className="inline-flex items-center gap-1 min-w-0">
+                              بواسطة <span className="font-bold text-gray-800 truncate">{entry.by}</span>
                               {entry.byRole && (
                                 <span
-                                  className={`mr-1 inline-flex items-center px-1.5 py-px rounded-full font-bold border ${
+                                  className={`inline-flex items-center px-1.5 py-px rounded-full font-bold border shrink-0 ${
                                     entry.byRole === 'admin'
                                       ? 'bg-blue-50 text-blue-700 border-blue-200'
                                       : 'bg-emerald-50 text-emerald-700 border-emerald-200'
@@ -1128,6 +1118,9 @@ return (
                                 </span>
                               )}
                             </span>
+                            {entry.supplier && (
+                              <span className="font-bold text-gray-600 whitespace-nowrap">🏷️ مورد: {entry.supplier}</span>
+                            )}
                           </div>
                         </div>
                       );
@@ -1137,7 +1130,7 @@ return (
               })()}
 
               {/* Timestamps */}
-              <div className="col-span-2 flex flex-wrap items-center gap-2 pt-1">
+              <div className="sm:col-span-2 flex flex-wrap items-center gap-2 pt-1">
                 <span className="inline-flex items-center gap-1.5 bg-blue-50 border border-blue-100 text-blue-800 text-xs font-semibold px-3 py-1.5 rounded-xl">
                   <span className="text-base">📅</span>
                   <span className="text-[10px] text-blue-500 font-bold">أُنشئ في</span>

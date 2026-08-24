@@ -21,17 +21,30 @@
 }
 
 /* Global Input validation & Focus styles */
+/* ✅ التركيز بلون الهوية الأزرق — الأحمر كان يوحي بأن الحقل فيه خطأ حتى وهو صحيح */
 input:focus, select:focus, textarea:focus {
   outline: none !important;
-  border-color: #dc2626 !important; /* Red color on focus/click */
-  box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.25) !important;
+  border-color: #2e5b9f !important;
+  box-shadow: 0 0 0 3px rgba(46, 91, 159, 0.18) !important;
 }
 
-/* Highlight required empty inputs */
+/* Highlight required empty inputs — الأحمر للحالات غير الصالحة فقط */
 input[required].touched:invalid,
 select[required].touched:invalid {
   border-color: #dc2626 !important;
   background-color: #fef2f2 !important;
+}
+
+/* ✅ إخفاء أسهم الزيادة/النقصان من حقول الأرقام — مظهر أنظف في شاشة الكاشير */
+input[type='number']::-webkit-outer-spin-button,
+input[type='number']::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  appearance: none;
+  margin: 0;
+}
+input[type='number'] {
+  -moz-appearance: textfield;
+  appearance: textfield;
 }
 
 /* Responsive Scroll Fixes */

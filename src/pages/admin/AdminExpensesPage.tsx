@@ -34,6 +34,41 @@ import {
   CheckCircle2,
 } from 'lucide-react';
 
+/** استخراج اسم المورد من وصف القيد بصيغة [مورد: ...] */
+const parseSupplierTag = (desc: string): string => {
+  const m = (desc || '').match(/\[مورد:\s*([^\]]+)\]/);
+  return m ? m[1].trim() : '';
+};
+
+/** استخراج رقم الفاتورة الورقية من الوصف بصيغة (فاتورة #...) */
+const parseInvoiceTag = (desc: string): string => {
+  const m = (desc || '').match(/\(فاتورة\s*#([^)]+)\)/);
+  return m ? m[1].trim() : '';
+};
+
+/** الوصف النظيف بدون أوسمة المورد والفاتورة */
+const cleanDescriptionText = (desc: string): string =>
+  (desc || '')
+    .replace(/\[مورد:[^\]]+\]\s*/g, '')
+    .replace(/\s*\(فاتورة\s*#[^)]+\)/g, '')
+    .trim();
+
+/** 🏷️ اسم شراء نظيف واحترافي بدل أوصاف الباك إند المعقدة زي
+ * "تعبة مخزون: حبوب 2 - اشتراء بضاعة" — الاسم بيطلع: اسم الصنف من المخزن + الكمية،
+ * والمورد ورقم الفاتورة بيتعرضوا كوسوم منفصلة تحت الاسم. */
+const purchaseTitleFor = (exp: Expense): string => {
+  const linked = exp.inventoryItemLinked;
+  if (linked && typeof linked === 'object' && linked.name) {
+    const qty = exp.inventoryQuantityAdded || 0;
+    return qty > 0 ? `${linked.name} — شراء ${formatNumber(qty)} ${linked.unit || ''}`.trim() : linked.name;
+  }
+  const clean = cleanDescriptionText(exp.description)
+    .replace(/^(تعبة|تعبية)\s*(مخزون|المخزون):\s*/i, '')
+    .replace(/\s*[-–]\s*(اشتراء|شراء)\s*بضاعة\s*$/i, '')
+    .replace(/\s*[-–]\s*شراء\s+.+$/i, '');
+  return clean || exp.description;
+};
+
 export const AdminExpensesPage: React.FC = () => {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([]);
@@ -670,36 +705,45 @@ export const AdminExpensesPage: React.FC = () => {
             </div>
           ) : (
             <div className="space-y-3">
-              {paginatedExpenses.map((exp) => {
+               {paginatedExpenses.map((exp) => {
                 const authorName =
                   typeof exp.addedBy === 'object' ? exp.addedBy.userName : exp.addedBy || 'المدير';
+                const supplier = parseSupplierTag(exp.description || '');
+                const invoiceNo = parseInvoiceTag(exp.description || '');
 
                 return (
                   <ExpenseCard
                     key={exp._id}
                     id={exp._id}
                     status="completed"
-                    title={exp.description}
+                    title={viewMode === 'purchases' ? purchaseTitleFor(exp) : exp.description}
                     subtitle={formatDate(exp.date || exp.createdAt)}
                     onClick={() => setViewingExpense(exp)}
                     amounts={{
                       primary: exp.amount,
                     }}
                     metadata={[
-                      { label: 'الفئة', value: categoryLabels[exp.category] || exp.category },
+                      ...(viewMode === 'purchases' && supplier
+                        ? [{ label: 'المورد', value: supplier }]
+                        : viewMode === 'purchases'
+                          ? []
+                          : [{ label: 'الفئة', value: categoryLabels[exp.category] || exp.category }]),
                       { label: 'بواسطة', value: authorName },
                     ]}
 
 
                     tags={
-                      exp.inventoryQuantityAdded
+                      viewMode === 'purchases'
                         ? [
-                            `تم توريد +${formatNumber(exp.inventoryQuantityAdded)} وحدة`,
-                            `سعر الوحدة: ${formatPrice(purchasePriceInfo.unitPrice.get(exp._id) || 0)}`,
+                            ...(exp.inventoryQuantityAdded ? [`تم توريد +${formatNumber(exp.inventoryQuantityAdded)} وحدة`] : []),
+                            ...(purchasePriceInfo.unitPrice.get(exp._id)
+                              ? [`سعر الوحدة: ${formatPrice(purchasePriceInfo.unitPrice.get(exp._id) || 0)}`]
+                              : []),
                             ...((purchasePriceInfo.prevPrice.get(exp._id) !== undefined &&
                               Math.abs((purchasePriceInfo.prevPrice.get(exp._id) || 0) - (purchasePriceInfo.unitPrice.get(exp._id) || 0)) > 0.009
                               ? [`📈 سعر جديد بدلاً من ${formatPrice(purchasePriceInfo.prevPrice.get(exp._id) || 0)}`]
                               : []) as string[]),
+                            ...(invoiceNo ? [`🧾 فاتورة #${invoiceNo}`] : []),
                           ]
                         : []
                     }
@@ -874,17 +918,21 @@ export const AdminExpensesPage: React.FC = () => {
         />
       )}
 
-       {/* Add Expense Modal */}
+       {/* Add Expense Modal — في تبويب المشتريات الفئة بتكون "مخزون" تلقائياً بدون قائمة منسدلة */}
       <Modal
         isOpen={isAddModalOpen}
         onClose={() => setIsAddModalOpen(false)}
-        title="تسجيل مصروف تشغيلي جديد"
+        title={viewMode === 'purchases' ? 'تسجيل توريد / شراء جديد للمخزن' : 'تسجيل مصروف تشغيلي جديد'}
         maxWidth="md"
       >
         <form noValidate onSubmit={handleCreateExpense} className="space-y-4 text-right">
           <Input
-            label="بيان المصروف *"
-            placeholder="مثال: فاتورة ، صيانة ماكينة، كهرباء..."
+            label={viewMode === 'purchases' ? 'اسم المادة الخام / البيان *' : 'بيان المصروف *'}
+            placeholder={
+              viewMode === 'purchases'
+                ? 'مثال: حبوب بن ، أكياس تغليف...'
+                : 'مثال: فاتورة ، صيانة ماكينة، كهرباء...'
+            }
             value={formData.description}
             onChange={(e) => {
               setFormData({ ...formData, description: e.target.value });
@@ -895,7 +943,7 @@ export const AdminExpensesPage: React.FC = () => {
             autoFocus
           />
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className={`grid gap-3 ${viewMode === 'purchases' ? 'grid-cols-1' : 'grid-cols-2'}`}>
             <Input
               label="المبلغ (جنيها) *"
               type="number"
@@ -910,20 +958,23 @@ export const AdminExpensesPage: React.FC = () => {
               required
             />
 
-            <Select
-              label="فئة المصروف *"
-              value={formData.category}
-              onChange={(e) =>
-                setFormData({ ...formData, category: e.target.value as ExpenseCategory })
-              }
-              options={[
-                { value: 'inventory', label: 'شراء مواد خام ومخزون' },
-                { value: 'salaries', label: 'رواتب وأجور' },
-                { value: 'utilities', label: 'مرافق وكهرباء ومياه' },
-                { value: 'rent', label: 'إيجار المقر' },
-                { value: 'other', label: 'مصاريف أخرى' },
-              ]}
-            />
+            {/* 🚫 مفيش خيار شراء/مخزون هنا — المصروفات التشغيلية للحاجات الخارجة بس،
+                والمشتريات ليها تبويبها الخاص (المشتريات والتوريدات) */}
+            {viewMode !== 'purchases' && (
+              <Select
+                label="فئة المصروف *"
+                value={formData.category}
+                onChange={(e) =>
+                  setFormData({ ...formData, category: e.target.value as ExpenseCategory })
+                }
+                options={[
+                  { value: 'salaries', label: 'رواتب وأجور' },
+                  { value: 'utilities', label: 'مرافق وكهرباء ومياه' },
+                  { value: 'rent', label: 'إيجار المقر' },
+                  { value: 'other', label: 'مصاريف أخرى' },
+                ]}
+              />
+            )}
           </div>
 
           {/* Dynamic Auto-Restock Link Fields (Backend Business Rule) */}
@@ -959,6 +1010,16 @@ export const AdminExpensesPage: React.FC = () => {
                   required
                 />
               </div>
+              {/* 💰 سعر تكلفة الوحدة بيتحسب تلقائياً ويظهر فوراً قبل الحفظ */}
+              {Number(formData.inventoryQuantityAdded) > 0 && Number(formData.amount) > 0 && (
+                <p className="text-[11px] font-bold bg-white border border-blue-100 rounded-lg px-2.5 py-1.5">
+                  سعر تكلفة الوحدة:{' '}
+                  <span className="font-mono text-[#2e5b9f]">
+                    {(Number(formData.amount) / Number(formData.inventoryQuantityAdded)).toFixed(2)} جنيها
+                  </span>
+                  <span className="text-gray-400 font-normal"> — هيُسجل على القيد ويتحدث في تفاصيل الصنف بالمخزن</span>
+                </p>
+              )}
             </div>
           )}
 
@@ -983,7 +1044,7 @@ export const AdminExpensesPage: React.FC = () => {
               isLoading={isSubmitting}
               className="bg-[#2e5b9f]"
             >
-              حفظ المصروف
+              {viewMode === 'purchases' ? 'حفظ التوريد' : 'حفظ المصروف'}
             </Button>
           </div>
         </form>
@@ -994,8 +1055,8 @@ export const AdminExpensesPage: React.FC = () => {
         isOpen={!!deleteTarget}
         onCancel={() => setDeleteTarget(null)}
         onConfirm={handleConfirmDelete}
-        title="تأكيد الحذف"
-        message="هل أنت متأكد من حذف هذا المصروف؟ لا يمكن التراجع عن هذا الإجراء."
+        title="تأكيد حذف المصروف"
+        message="سيتم حذف قيد المصروف نهائياً من السجل، وإذا كان مرتبطاً بمخزون ستتم إرجاع الكمية تلقائياً إلى رصيده. هل تريد المتابعة؟"
         confirmText="حذف"
         cancelText="إلغاء"
         variant="danger"
@@ -1011,10 +1072,27 @@ export const AdminExpensesPage: React.FC = () => {
         {viewingExpense && (
           <div className="space-y-4 text-right">
             <div className="flex items-center gap-4 p-4 bg-[#faf8f5] rounded-2xl border border-gray-100">
-              <ReceiptText className="w-10 h-10 rounded-xl bg-rose-500 text-white flex items-center justify-center" />
-              <div>
-                <h3 className="text-lg font-bold text-gray-900">{viewingExpense.description}</h3>
-               
+              <ReceiptText className="w-10 h-10 rounded-xl bg-rose-500 text-white flex items-center justify-center shrink-0" />
+              <div className="min-w-0">
+                <h3 className="text-lg font-bold text-gray-900 break-words">
+                  {viewingExpense.category === 'inventory'
+                    ? purchaseTitleFor(viewingExpense)
+                    : viewingExpense.description}
+                </h3>
+                {(viewingExpense.category === 'inventory' &&
+                  (parseSupplierTag(viewingExpense.description || '') || parseInvoiceTag(viewingExpense.description || ''))) && (
+                  <p className="text-[11px] text-gray-500 mt-1 break-words">
+                    {parseSupplierTag(viewingExpense.description || '') && (
+                      <span>🏷️ مورد: {parseSupplierTag(viewingExpense.description || '')}</span>
+                    )}
+                    {parseSupplierTag(viewingExpense.description || '') && parseInvoiceTag(viewingExpense.description || '') && (
+                      <span> • </span>
+                    )}
+                    {parseInvoiceTag(viewingExpense.description || '') && (
+                      <span>🧾 فاتورة #{parseInvoiceTag(viewingExpense.description || '')}</span>
+                    )}
+                  </p>
+                )}
               </div>
             </div>
 
@@ -1167,20 +1245,23 @@ export const AdminExpensesPage: React.FC = () => {
             />
           </div>
 
-          <Select
-            label="فئة المصروف *"
-            value={editFormData.category}
-            onChange={(e) =>
-              setEditFormData({ ...editFormData, category: e.target.value as ExpenseCategory })
-            }
-            options={[
-              { value: 'inventory', label: '📦 مواد خام / توريد مخزن' },
-              { value: 'salaries', label: '👥 رواتب' },
-              { value: 'rent', label: '🏠 إيجار' },
-              { value: 'utilities', label: '⚡ مرافق (كهرباء / مياه / غاز)' },
-              { value: 'other', label: '📋 أخرى' },
-            ]}
-          />
+          {/* فئة المصروف — مخفية لقيود المخزون، ومن غير خيار الشراء:
+              المشتريات بتتعدل من تبويبها الخاص بس */}
+          {editFormData.category !== 'inventory' && (
+            <Select
+              label="فئة المصروف *"
+              value={editFormData.category}
+              onChange={(e) =>
+                setEditFormData({ ...editFormData, category: e.target.value as ExpenseCategory })
+              }
+              options={[
+                { value: 'salaries', label: '👥 رواتب' },
+                { value: 'rent', label: '🏠 إيجار' },
+                { value: 'utilities', label: '⚡ مرافق (كهرباء / مياه / غاز)' },
+                { value: 'other', label: '📋 أخرى' },
+              ]}
+            />
+          )}
 
           {editFormData.category === 'inventory' && (
             <div className="space-y-3 p-4 bg-[#f0f5ff] rounded-xl border border-[#2e5b9f]/20">

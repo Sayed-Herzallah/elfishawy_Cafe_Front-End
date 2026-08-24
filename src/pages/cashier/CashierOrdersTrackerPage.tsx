@@ -3,6 +3,7 @@ import { orderService } from '../../services/opsService';
 import { productService } from '../../services/catalogService';
 import { Order, OrderStatus, Product } from '../../types';
 import { useNotification } from '../../contexts/NotificationContext';
+import { useAuth } from '../../contexts/AuthContext';
 import { ReceiptModal } from '../../components/ui/ReceiptModal';
 import { ExportModal } from '../../components/ui/ExportModal';
 import { LoadingSkeleton } from '../../components/ui/LoadingSkeleton';
@@ -40,6 +41,9 @@ export const CashierOrdersTrackerPage: React.FC = () => {
   const [isExportingPdf, setIsExportingPdf] = useState<boolean>(false);
 
   const { showToast, showError } = useNotification();
+  // 🔐 تحديث حالة الطلب (تسليم/إعادة للتحضير) صلاحية أدمن في الـ Backend —
+  // لا نعرض هذه الأزرار للكاشير حتى لا يرى إجراءً سيفشل دائماً بخطأ 403
+  const { isAdmin } = useAuth();
 
   const loadOrders = async () => {
     try {
@@ -486,10 +490,11 @@ export const CashierOrdersTrackerPage: React.FC = () => {
                       <span>طباعة الفاتورة</span>
                     </button>
 
-                    {isPending ? (
+                    {isAdmin && (isPending ? (
                       <button
                         onClick={(e) => { e.stopPropagation(); handleUpdateStatus(order._id, 'completed'); }}
                         className="inline-flex items-center justify-center gap-1 bg-emerald-600 hover:bg-emerald-700 text-white py-2.5 px-3 rounded-2xl text-xs font-bold transition shadow-2xs cursor-pointer"
+                        title="تأكيد تسليم الطلب — متاح للمدير"
                       >
                         <Check className="w-3.5 h-3.5" />
                         <span>تم التسليم ✓</span>
@@ -498,10 +503,11 @@ export const CashierOrdersTrackerPage: React.FC = () => {
                       <button
                         onClick={(e) => { e.stopPropagation(); handleUpdateStatus(order._id, 'pending'); }}
                         className="inline-flex items-center justify-center gap-1 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 py-2.5 px-3 rounded-2xl text-xs font-bold transition cursor-pointer"
+                        title="إرجاع الطلب إلى قيد التحضير — متاح للمدير"
                       >
                         <span>إعادة للتحضير ⏳</span>
                       </button>
-                    )}
+                    ))}
                   </div>
                 </div>
               </div>
@@ -578,10 +584,11 @@ export const CashierOrdersTrackerPage: React.FC = () => {
                           <Printer className="w-4 h-4" />
                         </button>
 
-                        {isPending && (
+                        {isAdmin && isPending && (
                           <button
                             onClick={() => handleUpdateStatus(order._id, 'completed')}
                             className="py-1 px-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs transition cursor-pointer"
+                            title="تأكيد تسليم الطلب — متاح للمدير"
                           >
                             تسليم ✓
                           </button>

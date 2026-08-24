@@ -48,7 +48,7 @@ export const AdminLayout: React.FC = () => {
     {
       title: "التهيئة والتشغيل",
       items: [
-        { to: "/admin/settings", label: "إعدادات المقهى", icon: <Settings className="w-4 h-4" /> },
+        { to: "/admin/settings", label: "إعدادات الحساب", icon: <Settings className="w-4 h-4" /> },
         { to: "/pos", label: "شاشة الكاشير (POS)", icon: <Store className="w-4 h-4" /> },
       ]
     }

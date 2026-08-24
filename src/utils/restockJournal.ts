@@ -112,16 +112,25 @@ export function mergeRestockHistory(itemId: string, logs: Expense[]): RestockHis
       byRole: j.byRole,
     }));
 
-  const dedupedJournal = journal.filter(
-    (j) =>
-      !server.some(
-        (s) =>
-          s.qty === j.qty &&
-          !isNaN(s.dateMs) &&
-          !isNaN(j.dateMs) &&
-          Math.abs(s.dateMs - j.dateMs) <= 3 * 60 * 1000
-      )
-  );
+  // ✅ مطابقة واحد-لواحد: قيد اليومية المحلية بيلغي قيد سيرفر واحد بس
+  // (نفس الكمية خلال 3 دقائق) — عشان لو حصلت توريدات متعددة بنفس الكمية في وقت قريب
+  // ميتلغيش قيود سيرفر صح بالغلط وميتحسبش أي توريد مرتين (سبب ظهور 7400 بدل 5300).
+  const usedServerIds = new Set<string>();
+  const dedupedJournal = journal.filter((j) => {
+    if (isNaN(j.dateMs)) return false;
+    const match = server.find(
+      (s) =>
+        !usedServerIds.has(s.id) &&
+        s.qty === j.qty &&
+        !isNaN(s.dateMs) &&
+        Math.abs(s.dateMs - j.dateMs) <= 3 * 60 * 1000
+    );
+    if (match) {
+      usedServerIds.add(match.id);
+      return false;
+    }
+    return true;
+  });
 
   return [...server, ...dedupedJournal]
     .filter((e) => !isNaN(e.dateMs))
@@ -130,37 +139,23 @@ export function mergeRestockHistory(itemId: string, logs: Expense[]): RestockHis
 
 /**
  * 📊 ملخص التكلفة الحقيقية للصنف من سجل المشتريات المرتبطة (قيد مخزون).
- * المشكلة اللي بيشتكي منها المستخدم: لما الباك إند بيخزن سعر تكلفة وحدة
- * آخر توريد بس، بييجي يقسم الإجمالي المعروض بالمخزون غلط
- * (مثلاً: شريت ٤٠٠٠ + ٣٣٠٠ = ٥٣٠٠ بس بيظهر ٤٠٠٠).
- * الحل هنا: المتوسط المرجّح من كل الفواتير الفعلية =
- *   الإجمالي المستثمر = Σ مبالغ فواتير الشراء للصنف
- *   متوسط سعر الوحدة = الإجمالي ÷ Σ الكميات المشتراة
+ * ✅ الحساب بيتعمل من السجل المدموج (mergeRestockHistory) بعد إزالة التكرار —
+ * يعني نفس القيود اللي بتظهر في "تاريخ الأسعار والتوريد" بالظبط.
+ * كده لو قيد اتسجل على السيرفر وفي يومية محلية في نفس الوقت مبيتحسبش مرتين،
+ * والإجمالي يطلع صح دايماً (مثال: 1000+1100+1100+1300+800 = 5300 مش 7400).
  */
 export function purchaseSummary(itemId: string, logs: Expense[]) {
+  const history = mergeRestockHistory(itemId, logs || []);
   let total = 0, qty = 0, count = 0;
-  (logs || []).forEach((e) => {
-    if (!e || e.category !== 'inventory') return;
-    const linked = e.inventoryItemLinked;
-    const linkedId = linked && typeof linked === 'object' ? (linked as InventoryItem)._id : (linked as string | undefined);
-    if (!linkedId || linkedId !== itemId) return;
-    total += Number(e.amount) || 0;
-    qty += Number(e.inventoryQuantityAdded) || 0;
+  history.forEach((h) => {
+    total += Number(h.totalCost) || 0;
+    qty += Number(h.qty) || 0;
     count += 1;
   });
-  // توريدات المدير من شاشة المخزون مبيتعملش عليها قيد سيرفر — نتأكد إنها معروضة
-  // بس نستبعد 'cashier-purchase' لأنها ليها قيد سيرفر مطابق (هتتعد مرتين).
-  getRestockJournal()
-    .filter((j) => j.itemId === itemId && j.source === 'admin-restock')
-    .forEach((j) => {
-      total += Number(j.totalCost) || 0;
-      qty += Number(j.qty) || 0;
-      count += 1;
-    });
   return {
     total,            // مجموع ما تم دفعه فعلاً
     qty,              // إجمالي الكمية المشتراة
-    count,            // عدد فواتير الشراء + عمليات التوريد
+    count,            // عدد فواتير الشراء + عمليات التوريد الفريدة
     avgUnitCost: qty > 0 ? Number((total / qty).toFixed(2)) : 0,  // متوسط سعر الوحدة
   };
 }

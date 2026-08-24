@@ -40,6 +40,7 @@ export interface Product {
   inStock: boolean;
   stockQuantity: number;
   availableQuantityByRecipe?: number | null;
+  menuGroup?: string;
   createdAt?: string;
   updatedAt?: string;
 }

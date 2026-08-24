@@ -9,23 +9,16 @@ export const AdminSettingsPage: React.FC = () => {
   const { user, updateProfile } = useAuth();
   const { showToast } = useNotification();
 
-    const [userName, setUserName] = useState(user?.userName || '');
-  const [phone, setPhone] = useState(user?.phone || '');
-  const [address, setAddress] = useState(user?.address || '');
+  const [userName, setUserName] = useState(user?.userName || '');
   const [isUpdating, setIsUpdating] = useState(false);
-  const [profileErrors, setProfileErrors] = useState<{ userName?: string; phone?: string }>({});
+  const [profileErrors, setProfileErrors] = useState<{ userName?: string }>({});
 
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
-    const errors: { userName?: string; phone?: string } = {};
+    const errors: { userName?: string } = {};
 
     if (!userName.trim()) {
       errors.userName = 'الاسم الكامل مطلوب';
-    }
-    if (!phone.trim()) {
-      errors.phone = 'رقم الهاتف مطلوب';
-    } else if (!/^[0-9+\s-]{10,15}$/.test(phone.trim())) {
-      errors.phone = 'الرجاء إدخال رقم هاتف صحيح';
     }
 
     if (Object.keys(errors).length > 0) {
@@ -36,7 +29,8 @@ export const AdminSettingsPage: React.FC = () => {
 
     setProfileErrors({});
     setIsUpdating(true);
-    const success = await updateProfile({ userName, phone, address });
+    // ✅ نرسل الاسم فقط — حقول الهاتف والعنوان غير مفعلة حالياً في هذه الشاشة
+    const success = await updateProfile({ userName });
     setIsUpdating(false);
     if (success) {
       showToast('تم حفظ بيانات الملف الشخصي بنجاح');
@@ -76,28 +70,10 @@ export const AdminSettingsPage: React.FC = () => {
             />
             <Input
               label="البريد الإلكتروني (غير قابل للتعديل)"
-              value={user?.email || 'admin@elfishawy.com'}
+              value={user?.email || ''}
               disabled
               className="bg-gray-50 opacity-80"
             />
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {/* <Input
-              label="رقم الهاتف *"
-              value={phone}
-              onChange={(e) => {
-                setPhone(e.target.value);
-                if (profileErrors.phone) setProfileErrors({ ...profileErrors, phone: undefined });
-              }}
-              error={profileErrors.phone}
-              required
-            /> */}
-            {/* <Input
-              label="العنوان"
-              value={address}
-              onChange={(e) => setAddress(e.target.value)}
-            /> */}
           </div>
 
           <div className="pt-2 flex justify-end">

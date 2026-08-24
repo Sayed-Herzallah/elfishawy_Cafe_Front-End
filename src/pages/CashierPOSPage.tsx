@@ -40,6 +40,8 @@ export const CashierPOSPage: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [cart, setCart] = useState<CartItem[]>([]);
   const [tableNumber, setTableNumber] = useState<string>('');
+  // ✅ Validation أحمر لرقم الطاولة — الحقل يظهر بخطأ واضح لما يتأكد الطلب وهو فاضي
+  const [tableNumberError, setTableNumberError] = useState<string>('');
   const [orderNote, setOrderNote] = useState<string>('');
   const [allOrders, setAllOrders] = useState<Order[]>([]);
   const [recentOrders, setRecentOrders] = useState<Order[]>([]);
@@ -47,10 +49,11 @@ export const CashierPOSPage: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [warnedProducts, setWarnedProducts] = useState<Record<string, boolean>>({});
+  // ✅ تأكيد قبل تفريغ السلة — "طلب جديد" كان يمسح السلة فوراً بدون تحذير
+  const [isClearCartConfirmOpen, setIsClearCartConfirmOpen] = useState<boolean>(false);
 
-  // Edit Order State
-  const [editingOrder, setEditingOrder] = useState<Order | null>(null);
-  const [isEditMode, setIsEditMode] = useState(false);
+  // Edit Order State — تمت الإزالة: تعديل الطلبات من الـ POS لم يكن يعمل أبداً
+  // (القائمة تعرض الطلبات المكتملة فقط، وتعديل الطلبات صلاحية أدمن في الـ Backend)
 
   // Today's Orders Modal & Search
   const [isTodayOrdersOpen, setIsTodayOrdersOpen] = useState<boolean>(false);
@@ -200,9 +203,24 @@ export const CashierPOSPage: React.FC = () => {
   const handleClearCart = () => {
     setCart([]);
     setTableNumber('');
+    setTableNumberError('');
     setOrderNote('');
     setWarnedProducts({});
     showToast('تم بدء طلب جديد وتفريغ السلة', 'info');
+  };
+
+  // ✅ "طلب جديد": لو السلة فيها أصناف نطلب تأكيداً أولاً حتى لا يفقد الكاشير طلبه بالخطأ
+  const handleNewOrderClick = () => {
+    if (cart.length > 0) {
+      setIsClearCartConfirmOpen(true);
+    } else {
+      showToast('السلة فارغة بالفعل — اختر الأصناف لبدء الطلب', 'info');
+    }
+  };
+
+  const handleConfirmedNewOrder = () => {
+    setIsClearCartConfirmOpen(false);
+    handleClearCart();
   };
 
   const totalAmount = cart.reduce((sum, item) => sum + item.product.price * item.quantity, 0);
@@ -214,6 +232,15 @@ export const CashierPOSPage: React.FC = () => {
       return;
     }
 
+    // ✅ رقم الطاولة إجباري (الـ Backend يشترطها لأوردر dine-in) — Validation أحمر على الحقل نفسه
+    const parsedTableNumber = tableNumber ? parseInt(tableNumber, 10) : NaN;
+    if (isNaN(parsedTableNumber) || parsedTableNumber < 1) {
+      setTableNumberError('رقم الطاولة مطلوب — اكتب رقم الطاولة قبل تأكيد الطلب');
+      showToast('الرجاء إدخال رقم الطاولة قبل تأكيد الطلب', 'error');
+      return;
+    }
+    setTableNumberError('');
+
     try {
       setIsSubmitting(true);
       const orderPayload = {
@@ -223,123 +250,18 @@ export const CashierPOSPage: React.FC = () => {
         })),
         paymentMethod: 'cash' as const,
         orderType: 'dine-in' as const,
-        tableNumber: tableNumber ? parseInt(tableNumber, 10) : 1,
+        tableNumber: parsedTableNumber,
         notes: orderNote,
       };
 
       const orderRes = await orderService.createOrder(orderPayload);
       if (orderRes.success && orderRes.data) {
-        // ⚡ خصم المخزون من المنتجات بعد تأكيد الطلب
-        await deductStockFromOrder(
-          orderRes.data.items.map((it) => ({
-            product: typeof it.product === 'object' ? it.product._id : it.product,
-            quantity: it.quantity,
-          }))
-        );
+        // ✅ لا حاجة لخصم المخزون من هنا — الـ Backend يخصم stockQuantity والمخزون الخام
+        // (عبر الوصفات) تلقائياً عند إنشاء الطلب. أي خصم إضافي كان يسبب خصماً مزدوجاً.
 
         showToast('تم تأكيد الطلب وحفظ الفاتورة بنجاح!');
         setSelectedReceiptOrder(orderRes.data);
         handleClearCart();
-        loadData();
-      }
-    } catch (err: any) {
-      showError(err);
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  /**
-   * Deduct purchased quantities from product stock after order creation.
-   * Updates each product's stockQuantity on the server.
-   */
-  const deductStockFromOrder = async (items: { product: string; quantity: number }[]) => {
-    try {
-      for (const item of items) {
-        const productId = item.product;
-        const purchasedQty = item.quantity;
-
-        const product = products.find((p) => p._id === productId);
-        if (!product) continue;
-
-        const newStockQty = Math.max(0, (product.stockQuantity || 0) - purchasedQty);
-
-        const formData = new FormData();
-        formData.append('name', product.name);
-        formData.append('price', String(product.price));
-
-        const catId = typeof product.category === 'string'
-          ? product.category
-          : (product.category?._id || '');
-        formData.append('category', catId);
-
-        formData.append('stockQuantity', String(newStockQty));
-        formData.append('inStock', String(newStockQty > 0));
-
-        if (product.description) {
-          formData.append('description', product.description);
-        }
-
-        await productService.updateProduct(productId, formData);
-      }
-    } catch (err) {
-      console.error('Failed to deduct stock from order:', err);
-    }
-  };
-  const handleStartEditOrder = (order: Order) => {
-    // Only allow editing pending orders
-    if (order.status !== 'pending') {
-      showToast('لا يمكن تعديل طلب تم تأكيده أو إلغاؤه', 'error');
-      return;
-    }
-    
-    // Populate cart from order items
-    const orderItems = Array.isArray(order.items) ? order.items : [];
-    const cartItems = orderItems.map(item => ({
-      product: typeof item.product === 'string' 
-        ? products.find(p => p._id === item.product) 
-        : item.product,
-      quantity: item.quantity,
-    })).filter(item => item.product) as CartItem[];
-    
-    setCart(cartItems);
-    setTableNumber(order.tableNumber ? String(order.tableNumber) : '');
-    setOrderNote(order.notes || '');
-    setEditingOrder(order);
-    setIsEditMode(true);
-    showToast('تم تحميل الطلب للتعديل', 'info');
-  };
-
-  const handleCancelEditMode = () => {
-    setEditingOrder(null);
-    setIsEditMode(false);
-    handleClearCart();
-  };
-
-  const handleUpdateOrder = async () => {
-    if (!editingOrder || cart.length === 0) {
-      showToast('لا توجد عناصر لتحديثها', 'error');
-      return;
-    }
-
-    try {
-      setIsSubmitting(true);
-      const orderPayload = {
-        items: cart.map((item) => ({
-          product: item.product._id,
-          quantity: item.quantity,
-        })),
-        paymentMethod: 'cash' as const,
-        orderType: 'dine-in' as const,
-        tableNumber: tableNumber ? parseInt(tableNumber, 10) : 1,
-        notes: orderNote,
-      };
-
-      const res = await orderService.updateOrder(editingOrder._id, orderPayload);
-      if (res.success && res.data) {
-        showToast('تم تحديث الطلب بنجاح!');
-        setSelectedReceiptOrder(res.data);
-        handleCancelEditMode();
         loadData();
       }
     } catch (err: any) {
@@ -411,7 +333,7 @@ export const CashierPOSPage: React.FC = () => {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b border-gray-200/70">
         <div className="flex flex-wrap items-center gap-2">
           <button
-            onClick={handleClearCart}
+            onClick={handleNewOrderClick}
             className="inline-flex items-center gap-1.5 bg-[#2e5b9f] hover:bg-[#244b85] text-white font-bold py-2 px-3.5 rounded-xl text-xs transition shadow-2xs cursor-pointer"
           >
             <Plus className="w-4 h-4" />
@@ -443,13 +365,12 @@ export const CashierPOSPage: React.FC = () => {
                   <span className="font-bold">#{String(ord.orderNumber || '----').slice(-4)}</span>
                 </button>
                 {ord.status === 'pending' && (
-                  <button
-                    onClick={() => handleStartEditOrder(ord)}
-                    className="inline-flex items-center gap-1 py-1.5 px-2.5 rounded-xl bg-amber-50 hover:bg-amber-100 border border-amber-200 text-xs font-bold text-amber-800 transition cursor-pointer shadow-2xs whitespace-nowrap"
-                    title="تعديل الطلب"
+                  <span
+                    className="inline-flex items-center gap-1 py-1.5 px-2.5 rounded-xl bg-amber-50 border border-amber-200 text-xs font-bold text-amber-800 whitespace-nowrap"
+                    title="طلب لم يكتمل بعد"
                   >
-                    <FileText className="w-3.5 h-3.5" />
-                  </button>
+                    <Clock className="w-3.5 h-3.5" />
+                  </span>
                 )}
               </div>
             ))}
@@ -462,15 +383,18 @@ export const CashierPOSPage: React.FC = () => {
         {/* Left Side: Cart Panel (5 cols) */}
         <div className="lg:col-span-5 bg-white rounded-2xl border border-gray-200/80 shadow-2xs p-5 flex flex-col justify-between order-2 lg:order-1 sticky top-16">
           <div>
-            {/* Header */}
+            {/* Header — العنوان على اليمين وعداد الأصناف على اليسار */}
             <div className="flex items-center justify-between pb-3.5 border-b border-gray-100 mb-3.5">
-              <span className="text-xs font-bold bg-blue-50 text-[#2e5b9f] px-3 py-1 rounded-lg font-mono">
-                {formatNumber(totalItemsCount)} أصناف
-              </span>
               <h2 className="text-base font-bold font-arabic-heading text-gray-900 flex items-center gap-2">
                 <Receipt className="w-5 h-5 text-[#2e5b9f]" />
                 <span>الطلب الحالي (السلة)</span>
               </h2>
+              <span className="inline-flex items-baseline gap-1.5 bg-blue-50 text-[#2e5b9f] px-4 py-1.5 rounded-xl font-bold border border-blue-100">
+                <span className="text-2xl font-bold font-mono leading-none">
+                  {formatNumber(totalItemsCount)}
+                </span>
+                <span className="text-sm font-bold leading-none">صنف</span>
+              </span>
             </div>
 
             {/* Cart Items with clear spacious typography */}
@@ -485,62 +409,62 @@ export const CashierPOSPage: React.FC = () => {
                 {cart.map((item) => (
                   <div
                     key={item.product._id}
-                    className="p-3.5 rounded-2xl bg-[#faf8f5] border border-gray-200/70 flex items-center justify-between gap-3 shadow-2xs hover:border-gray-300 transition"
+                    className="p-3.5 rounded-2xl bg-white border border-gray-200 shadow-2xs hover:border-gray-300 transition select-none"
                   >
-                    {/* Price and Delete */}
-                    <div className="flex items-center gap-2 shrink-0">
+                    {/* الصف الأول: اسم المنتج يمين — زر الإزالة يسار */}
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-sm font-bold text-gray-900 truncate">
+                        {item.product.name}
+                      </span>
                       <button
                         onClick={() => handleRemoveFromCart(item.product._id)}
-                        className="text-gray-400 hover:text-red-600 p-2 rounded-xl hover:bg-red-50 transition cursor-pointer"
-                        title="حذف الصنف"
+                        className="text-gray-400 hover:text-rose-600 p-1.5 rounded-lg hover:bg-rose-50 transition cursor-pointer shrink-0"
+                        title="إزالة من الطلب"
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
-
-                      <span className="text-base font-bold font-mono text-[#2e5b9f] whitespace-nowrap min-w-[65px] text-left">
-                        {formatPrice(item.product.price * item.quantity)}
-                      </span>
                     </div>
 
-                    {/* Stepper */}
-                    <div className="flex items-center bg-white border border-gray-200 rounded-xl overflow-hidden shrink-0 shadow-2xs">
-                      <button
-                        type="button"
-                        onClick={() => handleUpdateQuantityDelta(item.product._id, 1)}
-                        className="w-8 h-8 flex items-center justify-center text-sm font-bold text-gray-700 hover:bg-gray-100 transition cursor-pointer"
-                      >
-                        +
-                      </button>
-                      <input
-                        type="number"
-                        min="1"
-                        max={item.product.stockQuantity}
-                        value={item.quantity}
-                        onChange={(e) =>
-                          handleSetExactQuantity(item.product._id, parseInt(e.target.value, 10))
-                        }
-                        className="w-10 text-center text-sm font-bold font-mono text-gray-900 focus:outline-none bg-transparent py-1 border-x border-gray-100"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => handleUpdateQuantityDelta(item.product._id, -1)}
-                        className="w-8 h-8 flex items-center justify-center text-sm font-bold text-gray-700 hover:bg-gray-100 transition cursor-pointer"
-                      >
-                        -
-                      </button>
-                    </div>
+                    {/* الصف الثاني: تفاصيل السعر يمين — الكمية والإجمالي يسار */}
+                    <div className="flex items-center justify-between gap-3 mt-2.5 pt-2.5 border-t border-gray-100">
+                      <div className="text-xs font-semibold text-gray-700 leading-relaxed min-w-0 select-none">
+                        <span className="whitespace-nowrap">{formatPrice(item.product.price)} للقطعة</span>
+                        <span className="mx-1.5 text-gray-300">•</span>
+                        <span className="whitespace-nowrap">الحد الأقصى: {formatNumber(item.product.stockQuantity)}</span>
+                      </div>
 
-                    {/* Product Name (Full Visibility, larger text) */}
-                    <div className="text-right flex-1 min-w-0">
-                      <span className="text-sm font-bold text-gray-900 block truncate leading-snug">
-                        {item.product.name}
-                      </span>
-                      <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
-                        <span className="text-xs text-gray-500 font-mono">
-                          {formatPrice(item.product.price)} للقطعة
-                        </span>
-                        <span className="text-[10px] bg-amber-50 text-amber-800 border border-amber-200/60 px-1.5 py-0.2 rounded font-bold">
-                       أقصي عدد من الاكواب: {formatNumber(item.product.stockQuantity)} كوب
+                      <div className="flex items-center gap-2.5 shrink-0">
+                        {/* Stepper */}
+                        <div className="flex items-center bg-[#faf8f5] border border-gray-200 rounded-xl overflow-hidden shadow-2xs">
+                          <button
+                            type="button"
+                            onClick={() => handleUpdateQuantityDelta(item.product._id, 1)}
+                            className="w-8 h-8 flex items-center justify-center text-sm font-bold text-gray-700 hover:bg-gray-100 transition cursor-pointer"
+                          >
+                            +
+                          </button>
+                          <input
+                            type="number"
+                            min="1"
+                            max={item.product.stockQuantity}
+                            value={item.quantity}
+                            onChange={(e) =>
+                              handleSetExactQuantity(item.product._id, parseInt(e.target.value, 10))
+                            }
+                            className="w-10 text-center text-sm font-bold font-mono text-gray-900 focus:outline-none bg-transparent py-1 border-x border-gray-100"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => handleUpdateQuantityDelta(item.product._id, -1)}
+                            className="w-8 h-8 flex items-center justify-center text-sm font-bold text-gray-700 hover:bg-gray-100 transition cursor-pointer"
+                          >
+                            -
+                          </button>
+                        </div>
+
+                        {/* إجمالي الصنف */}
+                        <span className="text-base font-extrabold font-mono text-[#2e5b9f] whitespace-nowrap text-left">
+                          {formatPrice(item.product.price * item.quantity)}
                         </span>
                       </div>
                     </div>
@@ -549,74 +473,86 @@ export const CashierPOSPage: React.FC = () => {
               </div>
             )}
 
-            {/* Table Number (Strictly positive, no negative) & Notes */}
-            <div className="mt-4 pt-3.5 border-t border-gray-100 grid grid-cols-2 gap-2.5">
-              <input
-                type="number"
-                min="1"
-                placeholder="رقم الطاولة (مثال: 4)"
-                value={tableNumber}
-                onKeyDown={(e) => {
-                  if (e.key === '-' || e.key === 'e' || e.key === '+') e.preventDefault();
-                }}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  if (val === '') {
-                    setTableNumber('');
-                  } else {
-                    const num = parseInt(val, 10);
-                    if (!isNaN(num) && num > 0) setTableNumber(String(num));
-                  }
-                }}
-                className="bg-white border border-gray-200 rounded-xl px-3.5 py-2.5 text-xs text-gray-800 focus:outline-none focus:ring-1 focus:ring-[#2e5b9f] text-right font-medium shadow-2xs"
-              />
+            {/* رقم الطاولة والملاحظات — عناوين واضحة فوق كل حقل */}
+            <div className="mt-4 pt-3.5 border-t border-gray-100 grid grid-cols-2 gap-3">
+              <div>
+                <label className="flex items-center gap-1 text-xs font-bold text-gray-700 mb-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#2e5b9f] inline-block" />
+                  رقم الطاولة
+                  <span className="text-rose-600">*</span>
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  required
+                  placeholder="مثال: 4"
+                  value={tableNumber}
+                  onKeyDown={(e) => {
+                    if (e.key === '-' || e.key === 'e' || e.key === '+') e.preventDefault();
+                  }}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val === '') {
+                      setTableNumber('');
+                    } else {
+                      const num = parseInt(val, 10);
+                      if (!isNaN(num) && num > 0) {
+                        setTableNumber(String(num));
+                        setTableNumberError('');
+                      }
+                    }
+                  }}
+                  style={tableNumberError ? { borderColor: '#dc2626', backgroundColor: '#fef2f2' } : undefined}
+                  aria-invalid={!!tableNumberError}
+                  className={`w-full bg-[#faf8f5] border rounded-xl px-3.5 py-3 text-sm font-bold text-gray-900 focus:outline-none focus:ring-2 text-right shadow-2xs ${
+                    tableNumberError
+                      ? 'border-rose-500 focus:ring-rose-300 focus:border-rose-500'
+                      : 'border-gray-300 focus:ring-[#2e5b9f]/30 focus:border-[#2e5b9f]'
+                  }`}
+                />
+                {tableNumberError && (
+                  <p className="flex items-center gap-1 text-[11px] font-bold text-rose-600 mt-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-rose-600 inline-block shrink-0" />
+                    {tableNumberError}
+                  </p>
+                )}
+              </div>
 
-              <input
-                type="text"
-                placeholder="ملاحظات (سكر زيادة، دبل...)"
-                value={orderNote}
-                onChange={(e) => setOrderNote(e.target.value)}
-                className="bg-white border border-gray-200 rounded-xl px-3.5 py-2.5 text-xs text-gray-800 focus:outline-none focus:ring-1 focus:ring-[#2e5b9f] text-right shadow-2xs"
-              />
+              <div>
+                <label className="flex items-center gap-1 text-xs font-bold text-gray-700 mb-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500 inline-block" />
+                  ملاحظات
+                  <span className="text-gray-400 font-normal">(اختياري)</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="سكر زيادة، دبل..."
+                  value={orderNote}
+                  onChange={(e) => setOrderNote(e.target.value)}
+                  className="w-full bg-[#faf8f5] border border-gray-300 rounded-xl px-3.5 py-3 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-[#2e5b9f]/30 focus:border-[#2e5b9f] text-right shadow-2xs"
+                />
+              </div>
             </div>
 
-            {/* Total Row with prominent numbers */}
-            <div className="mt-4 p-4 rounded-2xl bg-blue-50/80 border border-blue-100 flex items-center justify-between text-gray-900 shadow-2xs">
-              <span className="font-mono text-2xl font-bold text-[#2e5b9f]">
+            {/* Total Row — الرقم على اليسار والوصف على اليمين */}
+            <div className="mt-4 p-5 rounded-2xl bg-blue-50/80 border border-blue-100 flex items-center justify-between text-gray-900 shadow-2xs">
+              <span className="text-base font-bold font-arabic-heading">المجموع الإجمالي:</span>
+              <span className="font-mono text-3xl font-bold text-[#2e5b9f] leading-none">
                 {formatPrice(totalAmount)}
               </span>
-              <span className="text-sm font-bold font-arabic-heading">المجموع الإجمالي:</span>
             </div>
           </div>
 
           {/* Direct Print Button */}
           <div className="mt-4">
-            {isEditMode && editingOrder && (
-              <div className="mb-3 p-3 rounded-xl bg-amber-50 border border-amber-200 flex items-center justify-between">
-                <span className="text-xs font-bold text-amber-800 flex items-center gap-1.5">
-                  <FileText className="w-3.5 h-3.5" />
-                  وضع التعديل - طلب #{String(editingOrder.orderNumber || editingOrder._id || '').slice(-4)}
-                </span>
-                <button
-                  onClick={handleCancelEditMode}
-                  className="text-amber-600 hover:text-amber-800 font-bold text-xs px-2 py-1 rounded-lg hover:bg-amber-100 transition"
-                >
-                  إلغاء التعديل
-                </button>
-              </div>
-            )}
             <button
-              onClick={isEditMode ? handleUpdateOrder : handleCheckoutAndPrint}
+              onClick={handleCheckoutAndPrint}
               disabled={isSubmitting || cart.length === 0}
               className="w-full flex items-center justify-center gap-2 bg-[#2e5b9f] hover:bg-[#244b85] disabled:opacity-50 text-white font-bold py-3.5 px-4 rounded-xl text-sm transition shadow-2xs cursor-pointer"
             >
               <Printer className="w-5 h-5 ml-1" />
               <span>
-                {isSubmitting
-                  ? 'جاري الحفظ...'
-                  : isEditMode
-                  ? 'تحديث الطلب وطباعة الفاتورة 🖨️'
-                  : 'تأكيد الطلب وطباعة الفاتورة 🖨️'}
+                {isSubmitting ? 'جاري الحفظ...' : 'تأكيد الطلب وطباعة الفاتورة 🖨️'}
               </span>
             </button>
           </div>
@@ -678,7 +614,7 @@ export const CashierPOSPage: React.FC = () => {
               <p className="text-xs text-gray-500 mt-2">جرّب كتابة اسم آخر أو اختر تصنيفاً مختلفاً من الأعلى</p>
             </div>
           ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2.5">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
               {filteredProducts.map((product) => {
                 const isOutOfStock = !product.inStock || product.stockQuantity <= 0;
                 const isLowStock = !isOutOfStock && product.stockQuantity <= 5;
@@ -689,23 +625,24 @@ export const CashierPOSPage: React.FC = () => {
                     key={product._id}
                     onClick={() => handleAddToCart(product)}
                     disabled={isOutOfStock}
-                    className={`relative bg-white rounded-xl border p-2.5 text-right flex flex-col justify-between transition group shadow-xs cursor-pointer ${
+                    className={`relative bg-white rounded-2xl border overflow-hidden text-right flex flex-col transition-all duration-200 group cursor-pointer ${
                       isOutOfStock
-                        ? 'opacity-50 border-gray-200 cursor-not-allowed bg-gray-50'
+                        ? 'opacity-55 border-gray-200 cursor-not-allowed bg-gray-50'
                         : cartQty > 0
-                        ? 'border-[#2e5b9f] ring-2 ring-[#2e5b9f]/20 bg-blue-50/20'
-                        : 'border-gray-200/80 hover:border-[#2e5b9f] hover:shadow-sm'
+                        ? 'border-[#2e5b9f] ring-2 ring-[#2e5b9f]/30 bg-[#2e5b9f]/[0.04] shadow-md'
+                        : 'border-gray-200/90 hover:border-[#2e5b9f] hover:shadow-lg hover:-translate-y-1'
                     }`}
                   >
-                    {/* Badge for Cart Count */}
+                    {/* شارة الكمية في السلة — تظهر عند الاختيار */}
                     {cartQty > 0 && (
-                      <span className="absolute top-1.5 left-1.5 z-10 w-5 h-5 rounded-full bg-[#2e5b9f] text-white text-[10px] font-bold font-mono flex items-center justify-center shadow-xs">
-                        {cartQty}
+                      <span className="absolute top-2 left-2 z-10 inline-flex items-center gap-1 bg-[#2e5b9f] text-white text-[11px] font-bold px-2.5 py-1 rounded-full shadow-lg ring-2 ring-white">
+                        <CheckCircle2 className="w-3 h-3" />
+                        ×{formatNumber(cartQty)}
                       </span>
                     )}
 
                     {/* Image */}
-                    <div className="w-full h-20 rounded-lg overflow-hidden mb-2 bg-gray-100 relative">
+                    <div className="w-full h-28 overflow-hidden bg-gray-100 relative">
                       <img
                         src={getProductImageUrl(product.image)}
                         alt={product.name}
@@ -716,43 +653,42 @@ export const CashierPOSPage: React.FC = () => {
                             'https://images.unsplash.com/photo-1514432324607-a09d9b4aefdd?q=80&w=800&auto=format&fit=crop';
                         }}
                       />
-                      {isLowStock && (
-                        <span className="absolute bottom-1 right-1 bg-amber-500/90 text-white text-[8px] font-bold px-1.5 py-0.5 rounded shadow-xs">
-                          متبقي {product.stockQuantity} فقط
+                      {isOutOfStock && (
+                        <span className="absolute inset-0 bg-white/60 flex items-center justify-center">
+                          <span className="bg-rose-600 text-white text-[10px] font-bold px-2.5 py-1 rounded-lg shadow-sm">
+                            نافد من المخزن
+                          </span>
                         </span>
                       )}
                     </div>
 
-                    {/* Product Info */}
-                    <div className="text-right flex-1 min-h-[50px] flex flex-col justify-between">
-                      <div>
-                        <h3 className="font-bold text-gray-900 text-xs leading-snug line-clamp-1 mb-1">
-                          {product.name}
-                        </h3>
-                        {/* 💰 السعر بارز وواضح — أهم معلومة للكاشير */}
-                        <span className="inline-flex items-baseline gap-0.5 bg-gradient-to-l from-[#2e5b9f]/[0.08] to-[#4a7cc9]/[0.12] border border-[#2e5b9f]/20 px-2 py-0.5 rounded-lg">
-                          <span className="text-sm font-extrabold font-mono text-[#2e5b9f] tracking-tight">
-                            {formatPrice(product.price)}
-                          </span>
-                        </span>
-                      </div>
+                    {/* Body */}
+                    <div className="p-2.5 flex flex-col gap-1.5 flex-1">
+                      <h3 className="font-bold text-gray-900 text-[13px] leading-snug line-clamp-1">
+                        {product.name}
+                      </h3>
 
-                      {/* Stock indicator */}
-                      <div className="flex items-center justify-between pt-1.5 border-t border-gray-50">
+                      {/* السعر — أهم معلومة للكاشير */}
+                      <span className="text-base font-extrabold font-mono text-[#2e5b9f] leading-none">
+                        {formatPrice(product.price)}
+                      </span>
+
+                      {/* الحالة + الحد الأقصى المتاح */}
+                      <div className="pt-1.5 mt-auto">
                         {isOutOfStock ? (
-                          <span className="text-[10px] text-rose-600 font-bold flex items-center gap-1">
+                          <span className="inline-flex items-center gap-1 text-[10px] font-bold text-rose-600 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-md">
                             <X className="w-3 h-3" />
-                            نافد
+                            غير متاح
                           </span>
                         ) : isLowStock ? (
-                          <span className="text-[10px] text-amber-600 font-bold flex items-center gap-1">
+                          <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-md">
                             <AlertTriangle className="w-3 h-3" />
-                            {formatNumber(product.stockQuantity)} متبقي
+                            الحد الأقصى: {formatNumber(product.stockQuantity)} فقط
                           </span>
                         ) : (
-                          <span className="text-[10px] text-emerald-600 font-bold flex items-center gap-1">
+                          <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md">
                             <CheckCircle2 className="w-3 h-3" />
-                            متوفر
+                            الحد الأقصى: {formatNumber(product.stockQuantity)}
                           </span>
                         )}
                       </div>
@@ -948,6 +884,18 @@ export const CashierPOSPage: React.FC = () => {
         isOpen={!!selectedReceiptOrder}
         onClose={() => setSelectedReceiptOrder(null)}
         products={products}
+      />
+
+      {/* ✅ تأكيد بدء طلب جديد عندما تحتوي السلة على أصناف */}
+      <ConfirmDialog
+        isOpen={isClearCartConfirmOpen}
+        title="بدء طلب جديد؟"
+        message={`السلة الحالية تحتوي على ${formatNumber(totalItemsCount)} صنف بقيمة ${formatPrice(totalAmount)}. سيتم تفريغ السلة ولن يتم حفظ هذا الطلب.`}
+        confirmText="نعم، ابدأ طلباً جديداً"
+        cancelText="إلغاء"
+        variant="warning"
+        onConfirm={handleConfirmedNewOrder}
+        onCancel={() => setIsClearCartConfirmOpen(false)}
       />
     </div>
   );

@@ -1,12 +1,15 @@
 import React, { useState } from 'react';
 import { Button } from '../components/ui/Button';
 import { useNotification } from '../contexts/NotificationContext';
-import { CheckCircle2 } from 'lucide-react';
+import { Clock } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 export const SurveyPage: React.FC = () => {
   const [feedback, setFeedback] = useState('');
-  const [isSubmitted, setIsSubmitted] = useState(false);
+  const [isUnavailable, setIsUnavailable] = useState(false);
+  // ⚠️ لا يوجد Endpoint للاستبيان في الـ Backend حالياً — كان النموذج يعرض
+  // "وصلتنا حكايتك" بينما البيانات تُرمى فعلاً، وهذا تضليل للمستخدم.
+  // حتى يتوفر الـ Endpoint، نعرض حالة صريحة بأن الخدمة قيد التجهيز بدل نجاح زائف.
   const { showToast } = useNotification();
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -15,23 +18,24 @@ export const SurveyPage: React.FC = () => {
       showToast('الرجاء كتابة رأيك أولاً', 'error');
       return;
     }
-    setIsSubmitted(true);
-    showToast('شكراً لمشاركتك حكايتك معنا!');
+    showToast('خدمة الاستبيان قيد التجهيز حالياً', 'info');
+    setIsUnavailable(true);
   };
 
   return (
     <div className="min-h-[80vh] flex items-center justify-center p-6 bg-[#fcfaf7]">
       <div className="w-full max-w-lg">
-        {isSubmitted ? (
+        {isUnavailable ? (
           <div className="bg-white rounded-3xl p-8 md:p-12 text-center shadow-xl border border-gray-100 space-y-4 animate-in fade-in">
-            <div className="w-16 h-16 bg-emerald-50 text-emerald-600 rounded-full flex items-center justify-center mx-auto">
-              <CheckCircle2 className="w-8 h-8" />
+            <div className="w-16 h-16 bg-amber-50 text-amber-600 rounded-full flex items-center justify-center mx-auto">
+              <Clock className="w-8 h-8" />
             </div>
             <h2 className="text-2xl font-bold font-arabic-heading text-gray-900">
-              وصلتنا حكايتك بمحبة!
+              الاستبيان قيد التجهيز
             </h2>
             <p className="text-xs text-gray-600 leading-relaxed max-w-xs mx-auto">
-              نشكرك على مشاركة تجربتك. رأيك يساعدنا لنقدم دائماً أفضل ما لدينا في الفيشاوي.
+              نعتذر، خدمة الاستبيان الإلكتروني غير متاحة حالياً ولم يتم إرسال ردك.
+              يسعدنا سماع رأيك دائماً عند زيارتنا للمقهى.
             </p>
             <div className="pt-4">
               <Link
