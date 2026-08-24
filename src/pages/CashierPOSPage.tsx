@@ -123,7 +123,8 @@ export const CashierPOSPage: React.FC = () => {
 
   const handleAddToCart = (product: Product) => {
     if (!product.inStock || product.stockQuantity <= 0) {
-      showToast(`صنف "${product.name}" نفد من المخزن`, 'error');
+      // ✅ رسالة واضحة عند الضغط على صنف نافذ — الزرار مش معطّل عشان الـclick يوصل هنا
+      showToast(`صنف "${product.name}" نافد من المخزن — لا يمكن إضافته للطلب`, 'error');
       return;
     }
 
@@ -614,7 +615,7 @@ export const CashierPOSPage: React.FC = () => {
                   <button
                     key={product._id}
                     onClick={() => handleAddToCart(product)}
-                    disabled={isOutOfStock}
+                    aria-disabled={isOutOfStock}
                     className={`relative bg-white rounded-2xl border overflow-hidden text-right flex flex-col transition-all duration-200 group cursor-pointer ${
                       isOutOfStock
                         ? 'opacity-55 border-gray-200 cursor-not-allowed bg-gray-50'

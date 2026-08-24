@@ -33,10 +33,6 @@ export interface ProductImage {
 export interface Product {
   _id: string;
   name: string;
-  /** الاسم الأساسي كما كتبه الأدمن — يستخدم لتجميع الأنواع */
-  baseName?: string;
-  /** نوع المنتج: سادة / زيادة / دبل... */
-  variantType?: string;
   description?: string;
   price: number;
   image?: ProductImage;

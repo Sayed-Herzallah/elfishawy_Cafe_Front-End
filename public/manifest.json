@@ -1,7 +1,7 @@
 {
-  "name": "الفيشاوي كافيه - نظام إدارة المقهى",
+  "name": "كافيه الفيشاوي",
   "short_name": "الفيشاوي",
-  "description": "نظام إدارة مقهى الفيشاوي المتكامل: نقاط بيع، مخزون، مبيعات، تقارير، مصروفات",
+  "description": "كافيه تراثي في قلب خان الخليلي بالقاهرة: قهوة بلدي، شاي، عصائر طازجة، ومنيو مشروبات متنوع.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#fcfaf7",
@@ -18,22 +18,6 @@
       "purpose": "any maskable"
     }
   ],
-  "categories": ["business", "productivity", "finance"],
-  "screenshots": [],
-  "shortcuts": [
-    {
-      "name": "نقطة البيع (POS)",
-      "short_name": "POS",
-      "description": "فتح شاشة نقطة البيع",
-      "url": "/pos",
-      "icons": [{ "src": "/favicon.svg", "sizes": "96x96" }]
-    },
-    {
-      "name": "لوحة التحكم",
-      "short_name": "Dashboard",
-      "description": "عرض لوحة التحكم والإحصائيات",
-      "url": "/admin",
-      "icons": [{ "src": "/favicon.svg", "sizes": "96x96" }]
-    }
-  ]
+  "categories": ["food", "lifestyle"],
+  "screenshots": []
 }

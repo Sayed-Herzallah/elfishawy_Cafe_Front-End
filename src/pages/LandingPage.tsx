@@ -2,9 +2,17 @@ import React from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { MENU_ITEMS, DEFAULT_MENU_IMAGE, getItemPriceRange, getCategoryById } from '../data/menuData';
 import { ArrowLeft, Sparkles } from 'lucide-react';
+import { usePageSEO } from '../seo/usePageSEO';
+import { PAGE_SEO } from '../seo/seoConfig';
+import { buildWebSiteSchema, buildCafeSchema } from '../seo/structuredData';
 
 export const LandingPage: React.FC = () => {
   const navigate = useNavigate();
+
+  usePageSEO({
+    meta: PAGE_SEO.home,
+    jsonLd: [buildWebSiteSchema(), buildCafeSchema()],
+  });
 
   // المنيو ثابت من src/data/menuData.ts — المميزة (الأكثر طلباً) الأول
   const featuredItems = [

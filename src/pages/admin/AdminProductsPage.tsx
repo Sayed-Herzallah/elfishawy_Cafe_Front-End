@@ -62,7 +62,6 @@ export const AdminProductsPage: React.FC = () => {
     price: '',
     category: '',
     stockQuantity: '',
-    variantType: '',
     imageFile: null as File | null,
   });
   const [formErrors, setFormErrors] = useState<{ name?: string; description?: string; price?: string; category?: string; stockQuantity?: string; imageFile?: string }>({});
@@ -200,7 +199,6 @@ export const AdminProductsPage: React.FC = () => {
       price: '',
       category: categories[0]?._id || '',
       stockQuantity: '',
-      variantType: '',
       imageFile: null,
     });
     setIsModalOpen(true);
@@ -220,7 +218,6 @@ export const AdminProductsPage: React.FC = () => {
       price: String(prod.price),
       category: catId,
       stockQuantity: String(prod.stockQuantity),
-      variantType: prod.variantType || '',
       imageFile: null,
     });
     
@@ -376,9 +373,6 @@ export const AdminProductsPage: React.FC = () => {
         : (formData.stockQuantity || '0');
         
       data.append('stockQuantity', finalStockQty);
-      if (formData.variantType.trim()) {
-        data.append('variantType', formData.variantType.trim());
-      }
       if (formData.imageFile) {
         data.append('image', formData.imageFile);
       }
@@ -1131,23 +1125,6 @@ export const AdminProductsPage: React.FC = () => {
             {formErrors.description && isFormSubmitted && (
               <p className="text-[11px] text-rose-600 font-bold mt-1">⚠️ {formErrors.description}</p>
             )}
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold mb-1.5 text-gray-700">
-              نوع المنتج <span className="text-gray-400 font-normal">(اختياري)</span>
-            </label>
-            <input
-              type="text"
-              maxLength={30}
-              placeholder="مثال: سادة"
-              value={formData.variantType}
-              onChange={(e) => setFormData({ ...formData, variantType: e.target.value })}
-              className="w-full bg-[#faf8f5] hover:bg-white focus:bg-white border border-gray-200 rounded-xl p-3 text-xs outline-none focus:ring-2 focus:ring-[#2e5b9f]/20 focus:border-[#2e5b9f]"
-            />
-            <p className="text-[11px] text-gray-400 mt-1">
-              الاسم النهائي للفاتورة = اسم المنتج + النوع (مثال: «قهوة» + «سادة» ← قهوة سادة). اتركه فارغاً لو المنتج له نوع واحد فقط.
-            </p>
           </div>
 
           <div>

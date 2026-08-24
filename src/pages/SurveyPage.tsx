@@ -3,6 +3,8 @@ import { Button } from '../components/ui/Button';
 import { useNotification } from '../contexts/NotificationContext';
 import { Clock } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { usePageSEO } from '../seo/usePageSEO';
+import { PAGE_SEO } from '../seo/seoConfig';
 
 export const SurveyPage: React.FC = () => {
   const [feedback, setFeedback] = useState('');
@@ -11,6 +13,8 @@ export const SurveyPage: React.FC = () => {
   // "وصلتنا حكايتك" بينما البيانات تُرمى فعلاً، وهذا تضليل للمستخدم.
   // حتى يتوفر الـ Endpoint، نعرض حالة صريحة بأن الخدمة قيد التجهيز بدل نجاح زائف.
   const { showToast } = useNotification();
+
+  usePageSEO({ meta: PAGE_SEO.survey });
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();

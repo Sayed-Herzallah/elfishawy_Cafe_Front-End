@@ -9,12 +9,20 @@ import {
   getItemPriceRange,
 } from '../data/menuData';
 import { Search, SearchX, ArrowLeft, X, Sparkles } from 'lucide-react';
+import { usePageSEO } from '../seo/usePageSEO';
+import { PAGE_SEO } from '../seo/seoConfig';
+import { buildWebSiteSchema, buildMenuPageSchemas } from '../seo/structuredData';
 
 const ALL_FILTER = 'all';
 
 export const PublicMenuPage: React.FC = () => {
   const [activeCategory, setActiveCategory] = useState<string>(ALL_FILTER);
   const [searchQuery, setSearchQuery] = useState<string>('');
+
+  usePageSEO({
+    meta: PAGE_SEO.menu,
+    jsonLd: [buildWebSiteSchema(), ...buildMenuPageSchemas()],
+  });
 
   const categories = getSortedCategories();
 

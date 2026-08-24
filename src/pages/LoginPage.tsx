@@ -4,6 +4,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { Coffee, Eye, EyeOff } from 'lucide-react';
+import { usePageSEO } from '../seo/usePageSEO';
+import { PAGE_SEO } from '../seo/seoConfig';
 
 export const LoginPage: React.FC = () => {
   const [email, setEmail] = useState('');
@@ -12,6 +14,9 @@ export const LoginPage: React.FC = () => {
   const [errorMessage, setErrorMessage] = useState('');
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+
+  // صفحة خاصة بفريق العمل — مستبعدة من الفهرسة
+  usePageSEO({ meta: PAGE_SEO.login });
 
   const { login } = useAuth();
   const navigate = useNavigate();

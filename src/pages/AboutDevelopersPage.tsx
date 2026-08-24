@@ -14,6 +14,8 @@ import {
   Monitor,
   Globe,
 } from "lucide-react";
+import { usePageSEO } from "../seo/usePageSEO";
+import { PAGE_SEO } from "../seo/seoConfig";
 
 interface Developer {
   name: string;
@@ -103,6 +105,8 @@ const SocialLinks: React.FC<{ social: Developer["social"] }> = ({ social }) => {
 };
 
 export const AboutDevelopersPage: React.FC = () => {
+  usePageSEO({ meta: PAGE_SEO.developers });
+
   const developers: Developer[] = [
     {
       name: "السيد حرز الله",

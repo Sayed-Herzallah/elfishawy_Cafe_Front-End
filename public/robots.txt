@@ -1,0 +1,12 @@
+# robots.txt — كافيه الفيشاوي
+# الملف ليس آلية حماية — الصفحات الخاصة محمية بتسجيل الدخول والصلاحيات فعلياً
+
+User-agent: *
+Allow: /
+Disallow: /login
+Disallow: /admin
+Disallow: /pos
+Disallow: /survey/thank-you
+
+# Sitemap
+Sitemap: https://elfishawy-cafe.vercel.app/sitemap.xml
