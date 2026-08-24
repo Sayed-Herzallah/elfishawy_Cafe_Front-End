@@ -417,10 +417,29 @@ export const CashierInventoryPage: React.FC = () => {
         ) : filteredItems.length === 0 ? (
           <div className="text-center py-12 bg-white border border-dashed border-gray-200 rounded-2xl text-gray-400">
             <div className="w-14 h-14 rounded-2xl bg-[#2e5b9f]/5 border border-[#2e5b9f]/15 flex items-center justify-center text-[#2e5b9f] mx-auto mb-3">
-              <SearchX className="w-6 h-6" />
+              {filterMode === 'low' || filterMode === 'out' ? <CheckCircle2 className="w-6 h-6" /> : <SearchX className="w-6 h-6" />}
             </div>
-            <p className="text-gray-600 font-bold text-sm">لا توجد أصناف خامات مطابقة</p>
-            <p className="text-xs text-gray-500 mt-2">جرّب كلمة بحث أخرى أو امسح الفلاتر لعرض كل الأصناف.</p>
+            {filterMode === 'low' ? (
+              <>
+                <p className="text-gray-600 font-bold text-sm">لا توجد خامات منخفضة حالياً</p>
+                <p className="text-xs text-gray-500 mt-2">كل الأرصدة فوق حد الأمان — لا حاجة لتوريد عاجل.</p>
+              </>
+            ) : filterMode === 'out' ? (
+              <>
+                <p className="text-gray-600 font-bold text-sm">لا توجد خامات نافدة حالياً</p>
+                <p className="text-xs text-gray-500 mt-2">كل الأصناف لديها رصيد متاح بالمخزن.</p>
+              </>
+            ) : searchQuery.trim() ? (
+              <>
+                <p className="text-gray-600 font-bold text-sm">لا توجد خامات تطابق كلمة البحث</p>
+                <p className="text-xs text-gray-500 mt-2">جرّب كلمة أخرى أو امسح البحث لعرض كل الأصناف ({formatNumber(items.length)} صنف).</p>
+              </>
+            ) : (
+              <>
+                <p className="text-gray-600 font-bold text-sm">لا توجد خامات في المخزون بعد</p>
+                <p className="text-xs text-gray-500 mt-2">ابدأ بإضافة صنف مخزون جديد ليظهر هنا.</p>
+              </>
+            )}
           </div>
         ) : (
           <div className="overflow-x-auto">

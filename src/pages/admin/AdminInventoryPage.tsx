@@ -69,11 +69,12 @@ export const AdminInventoryPage: React.FC = () => {
   const [editingItem, setEditingItem] = useState<InventoryItem | null>(null);
   const [editFormData, setEditFormData] = useState({
     name: '',
+    quantity: '',
     unit: 'KG',
     minLimit: '5',
     totalCost: '',
   });
-  const [editFormErrors, setEditFormErrors] = useState<{ name?: string; minLimit?: string; totalCost?: string }>({});
+  const [editFormErrors, setEditFormErrors] = useState<{ name?: string; quantity?: string; minLimit?: string; totalCost?: string }>({});
   const [isEditFormSubmitted, setIsEditFormSubmitted] = useState(false);
 
   // View Detail State
@@ -275,20 +276,23 @@ export const AdminInventoryPage: React.FC = () => {
   const handleUpdateItem = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsEditFormSubmitted(true);
-    const errors: { name?: string; minLimit?: string; totalCost?: string } = {};
+    const errors: { name?: string; quantity?: string; minLimit?: string; totalCost?: string } = {};
 
     if (!editFormData.name.trim()) {
       errors.name = 'اسم الصنف مطلوب';
     }
+    if (editFormData.quantity === '' || Number(editFormData.quantity) < 0) {
+      errors.quantity = 'الرجاء إدخال رصيد صحيح (صفر أو أكثر)';
+    }
     if (editFormData.minLimit === '' || Number(editFormData.minLimit) < 1) {
       errors.minLimit = 'الرجاء تحديد حد أدنى صحيح (1 أو أكثر)';
     }
-    // ✅ التكلفة الإجمالية اختيارية — لو اتكتبت لازم تكون أكبر من صفر والكمية الحالية تكفي للحساب
+    // ✅ التكلفة الإجمالية اختيارية — لو اتكتبت لازم تكون أكبر من صفر والكمية الجديدة تكفي للحساب
     if (editFormData.totalCost !== '') {
       if (Number(editFormData.totalCost) <= 0) {
         errors.totalCost = 'التكلفة الإجمالية يجب أن تكون أكبر من صفر';
-      } else if ((editingItem?.quantity || 0) <= 0) {
-        errors.totalCost = 'الكمية الحالية صفر — ورد كمية أولاً عشان نقدر نحسب التكلفة';
+      } else if (Number(editFormData.quantity) <= 0) {
+        errors.totalCost = 'الكمية صفر — لا يمكن حساب التكلفة. امسح التكلفة أو عدّل الكمية.';
       }
     }
 
@@ -302,9 +306,9 @@ export const AdminInventoryPage: React.FC = () => {
 
     try {
       setIsSubmitting(true);
-      // ✅ تعديل التكلفة الإجمالية من الفرونت — الـ API بيخزن تكلفة الوحدة (الإجمالي ÷ الكمية الحالية)
+      // ✅ تعديل التكلفة الإجمالية من الفرونت — الـ API بيخزن تكلفة الوحدة (الإجمالي ÷ الكمية الجديدة)
       const totalNum = Number(editFormData.totalCost);
-      const qtyNum = editingItem!.quantity || 0;
+      const qtyNum = Number(editFormData.quantity) || 0;
       const updatedCostPrice =
         editFormData.totalCost !== '' && totalNum > 0 && qtyNum > 0
           ? Number((totalNum / qtyNum).toFixed(2))
@@ -312,6 +316,7 @@ export const AdminInventoryPage: React.FC = () => {
 
       const res = await inventoryService.updateItem(editingItem!._id, {
         name: editFormData.name.trim(),
+        quantity: qtyNum,
         unit: editFormData.unit,
         minLimit: Number(editFormData.minLimit),
         ...(updatedCostPrice !== undefined ? { costPrice: updatedCostPrice } : {}),
@@ -502,10 +507,29 @@ export const AdminInventoryPage: React.FC = () => {
           ) : filteredItems.length === 0 ? (
             <div className="text-center py-14 bg-white border border-dashed border-gray-200 rounded-2xl text-gray-400 mx-2">
               <div className="w-14 h-14 rounded-2xl bg-[#2e5b9f]/5 border border-[#2e5b9f]/15 flex items-center justify-center text-[#2e5b9f] mx-auto mb-3">
-                <Boxes className="w-6 h-6" />
+                {filterMode === 'low' || filterMode === 'out' ? <CheckCircle2 className="w-6 h-6" /> : <Boxes className="w-6 h-6" />}
               </div>
-              <p className="text-gray-600 font-bold text-sm">لا توجد أصناف مطابقة</p>
-              <p className="text-xs text-gray-500 mt-2">جرّب كلمة بحث أخرى أو امسح الفلاتر لعرض كل الأصناف.</p>
+              {filterMode === 'low' ? (
+                <>
+                  <p className="text-gray-600 font-bold text-sm">لا توجد أصناف منخفضة حالياً</p>
+                  <p className="text-xs text-gray-500 mt-2">كل الأرصدة فوق حد الأمان — لا حاجة لتوريد عاجل.</p>
+                </>
+              ) : filterMode === 'out' ? (
+                <>
+                  <p className="text-gray-600 font-bold text-sm">لا توجد أصناف نافدة حالياً</p>
+                  <p className="text-xs text-gray-500 mt-2">كل الأصناف لديها رصيد متاح بالمخزن.</p>
+                </>
+              ) : searchQuery.trim() || dateFrom || dateTo ? (
+                <>
+                  <p className="text-gray-600 font-bold text-sm">لا توجد أصناف مطابقة للفلاتر الحالية</p>
+                  <p className="text-xs text-gray-500 mt-2">جرّب تعديل البحث أو امسح الفلاتر لعرض كل الأصناف.</p>
+                </>
+              ) : (
+                <>
+                  <p className="text-gray-600 font-bold text-sm">لا توجد أصناف في المخزون بعد</p>
+                  <p className="text-xs text-gray-500 mt-2">ابدأ بإضافة صنف مخزون جديد ليظهر هنا.</p>
+                </>
+              )}
             </div>
           ) : (
             <>
@@ -585,6 +609,7 @@ return (
                               setEditingItem(item);
                               setEditFormData({
                                 name: item.name,
+                                quantity: String(item.quantity),
                                 unit: item.unit,
                                 minLimit: String(item.minLimit),
                                 totalCost: item.costPrice ? String(Number((item.costPrice * item.quantity).toFixed(2))) : '',
@@ -704,6 +729,7 @@ return (
                                   setEditingItem(item);
                                   setEditFormData({
                                     name: item.name,
+                                    quantity: String(item.quantity),
                                     unit: item.unit,
                                     minLimit: String(item.minLimit),
                                     totalCost: item.costPrice ? String(Number((item.costPrice * item.quantity).toFixed(2))) : '',
@@ -1197,18 +1223,36 @@ return (
             required
           />
 
-          <Select
-            label="وحدة القياس *"
-            value={editFormData.unit}
-            onChange={(e) => setEditFormData({ ...editFormData, unit: e.target.value })}
-            options={[
-              { value: 'KG', label: 'كيلوجرام (KG)' },
-              { value: 'GRAM', label: 'جرام (GRAM)' },
-              { value: 'LITER', label: 'لتر (LITER)' },
-              { value: 'ML', label: 'مليلتر (ML)' },
-              { value: 'PIECE', label: 'قطعة (PIECE)' },
-            ]}
-          />
+          <div className="grid grid-cols-2 gap-3">
+            <Input
+              label="الرصيد الحالي *"
+              type="number"
+              min="0"
+              step="any"
+              value={editFormData.quantity}
+              onChange={(e) => {
+                setEditFormData({ ...editFormData, quantity: e.target.value });
+                if (editFormErrors.quantity) setEditFormErrors({ ...editFormErrors, quantity: undefined });
+              }}
+              error={editFormErrors.quantity}
+              isSubmitted={isEditFormSubmitted}
+              helperText="تصحيح يدوي للرصيد — استخدمه لو الرقم المسجل غلط."
+              required
+            />
+
+            <Select
+              label="وحدة القياس *"
+              value={editFormData.unit}
+              onChange={(e) => setEditFormData({ ...editFormData, unit: e.target.value })}
+              options={[
+                { value: 'KG', label: 'كيلوجرام (KG)' },
+                { value: 'GRAM', label: 'جرام (GRAM)' },
+                { value: 'LITER', label: 'لتر (LITER)' },
+                { value: 'ML', label: 'مليلتر (ML)' },
+                { value: 'PIECE', label: 'قطعة (PIECE)' },
+              ]}
+            />
+          </div>
 
           <Input
             label="حد الأمان الأدنى (Min Limit) *"
@@ -1240,10 +1284,10 @@ return (
             isSubmitted={isEditFormSubmitted}
           />
           <p className="text-[10px] text-gray-400 -mt-2">
-            عدّل الإجمالي لو الكمية نفسها بسعر جديد — سعر تكلفة الوحدة بيتحدث تلقائياً: الإجمالي ÷ الكمية الحالية
-            {Number(editFormData.totalCost) > 0 && (editingItem?.quantity || 0) > 0 && (
+            عدّل الإجمالي لو الكمية نفسها بسعر جديد — سعر تكلفة الوحدة بيتحدث تلقائياً: الإجمالي ÷ الكمية
+            {Number(editFormData.totalCost) > 0 && Number(editFormData.quantity) > 0 && (
               <span className="font-mono font-bold text-[#2e5b9f]">
-                {' '}= {(Number(editFormData.totalCost) / editingItem!.quantity).toFixed(2)} / {editFormData.unit}
+                {' '}= {(Number(editFormData.totalCost) / Number(editFormData.quantity)).toFixed(2)} / {editFormData.unit}
               </span>
             )}
           </p>

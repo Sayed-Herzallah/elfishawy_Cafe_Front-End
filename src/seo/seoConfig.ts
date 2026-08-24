@@ -7,7 +7,7 @@
  * ثم أعد البناء — كل الـcanonical والـOG والـsitemap بتقرأ منه.
  */
 
-export const SITE_URL = (import.meta.env.VITE_SITE_URL || 'https://elfishawy-cafe.vercel.app').replace(/\/$/, '');
+export const SITE_URL = (import.meta.env.VITE_SITE_URL || 'https://fishawy.vercel.app').replace(/\/$/, '');
 
 export const SITE_NAME = 'كافيه الفيشاوي';
 

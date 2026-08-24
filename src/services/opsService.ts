@@ -81,6 +81,7 @@ export const inventoryService = {
 
   updateItem: (id: string, data: {
     name?: string;
+    quantity?: number;
     unit?: string;
     minLimit?: number;
     costPrice?: number;

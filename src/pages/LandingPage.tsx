@@ -35,7 +35,7 @@ export const LandingPage: React.FC = () => {
         <div
           className="absolute inset-0 bg-cover bg-center opacity-40 scale-105 transform transition-transform duration-1000"
           style={{
-            backgroundImage: `url('https://images.unsplash.com/photo-1495474472287-4d71bcdd2085?q=80&w=1600&auto=format&fit=crop')`,
+            backgroundImage: `url('https://images.unsplash.com/photo-1495474472287-4d71bcdd2085?q=75&w=1200&auto=format&fit=crop')`,
           }}
         />
         <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/40 to-black/70" />

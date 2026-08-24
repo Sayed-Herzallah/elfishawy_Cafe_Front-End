@@ -1,37 +1,52 @@
-import React from 'react';
+import React, { Suspense, lazy } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import { PublicLayout } from '../components/layout/PublicLayout';
 import { AdminLayout } from '../components/layout/AdminLayout';
 import { CashierLayout } from '../components/layout/CashierLayout';
 
 import { LandingPage } from '../pages/LandingPage';
-import { PublicMenuPage } from '../pages/PublicMenuPage';
-import { SurveyPage } from '../pages/SurveyPage';
-import { AboutDevelopersPage } from '../pages/AboutDevelopersPage';
-import { LoginPage } from '../pages/LoginPage';
-import { CashierPOSPage } from '../pages/CashierPOSPage';
-import { CashierOrdersTrackerPage } from '../pages/cashier/CashierOrdersTrackerPage';
-import { CashierInventoryPage } from '../pages/cashier/CashierInventoryPage';
-import { CashierExpensesPage } from '../pages/cashier/CashierExpensesPage';
-
-import { AdminDashboardPage } from '../pages/admin/AdminDashboardPage';
-import { AdminProductsPage } from '../pages/admin/AdminProductsPage';
-import { AdminCategoriesPage } from '../pages/admin/AdminCategoriesPage';
-import { AdminInventoryPage } from '../pages/admin/AdminInventoryPage';
-import { AdminSalesPage } from '../pages/admin/AdminSalesPage';
-import { AdminExpensesPage } from '../pages/admin/AdminExpensesPage';
-import { AdminReportsPage } from '../pages/admin/AdminReportsPage';
-import { AdminSettingsPage } from '../pages/admin/AdminSettingsPage';
-
 import { NotFoundPage } from '../pages/NotFoundPage';
 import { ProtectedRoute } from './ProtectedRoute';
 import { RoleGuard } from './RoleGuard';
 import { ErrorBoundary } from '../components/ui/ErrorBoundary';
 
+// ⚡ تقسيم الكود: الصفحة الرئيسية فقط تُحمّل مع الحزمة الأولى (صفحة الـLCP) —
+// باقي الصفحات (ومعها مكتبات recharts وjspdf الثقيلة) تُحمّل عند الطلب فقط،
+// وده بيقلل حجم JavaScript الأولي وبيسرّع أول عرض بشكل كبير على الموبايل.
+const PublicMenuPage = lazy(() => import('../pages/PublicMenuPage').then((m) => ({ default: m.PublicMenuPage })));
+const SurveyPage = lazy(() => import('../pages/SurveyPage').then((m) => ({ default: m.SurveyPage })));
+const AboutDevelopersPage = lazy(() => import('../pages/AboutDevelopersPage').then((m) => ({ default: m.AboutDevelopersPage })));
+const LoginPage = lazy(() => import('../pages/LoginPage').then((m) => ({ default: m.LoginPage })));
+
+const CashierPOSPage = lazy(() => import('../pages/CashierPOSPage').then((m) => ({ default: m.CashierPOSPage })));
+const CashierOrdersTrackerPage = lazy(() => import('../pages/cashier/CashierOrdersTrackerPage').then((m) => ({ default: m.CashierOrdersTrackerPage })));
+const CashierInventoryPage = lazy(() => import('../pages/cashier/CashierInventoryPage').then((m) => ({ default: m.CashierInventoryPage })));
+const CashierExpensesPage = lazy(() => import('../pages/cashier/CashierExpensesPage').then((m) => ({ default: m.CashierExpensesPage })));
+
+const AdminDashboardPage = lazy(() => import('../pages/admin/AdminDashboardPage').then((m) => ({ default: m.AdminDashboardPage })));
+const AdminProductsPage = lazy(() => import('../pages/admin/AdminProductsPage').then((m) => ({ default: m.AdminProductsPage })));
+const AdminCategoriesPage = lazy(() => import('../pages/admin/AdminCategoriesPage').then((m) => ({ default: m.AdminCategoriesPage })));
+const AdminInventoryPage = lazy(() => import('../pages/admin/AdminInventoryPage').then((m) => ({ default: m.AdminInventoryPage })));
+const AdminSalesPage = lazy(() => import('../pages/admin/AdminSalesPage').then((m) => ({ default: m.AdminSalesPage })));
+const AdminExpensesPage = lazy(() => import('../pages/admin/AdminExpensesPage').then((m) => ({ default: m.AdminExpensesPage })));
+const AdminReportsPage = lazy(() => import('../pages/admin/AdminReportsPage').then((m) => ({ default: m.AdminReportsPage })));
+const AdminSettingsPage = lazy(() => import('../pages/admin/AdminSettingsPage').then((m) => ({ default: m.AdminSettingsPage })));
+
 // غلاف آمن لكل صفحة: أي خطأ Runtime يظهر كرسالة واضحة بدل الصفحة البيضاء
 const SafePage: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   <ErrorBoundary>
-    {children}
+    <Suspense
+      fallback={
+        <div className="min-h-[50vh] flex items-center justify-center">
+          <div className="flex flex-col items-center gap-3">
+            <div className="w-9 h-9 rounded-full border-[3px] border-[#2e5b9f]/20 border-t-[#2e5b9f] animate-spin" />
+            <span className="text-xs font-bold text-gray-400">جارٍ التحميل...</span>
+          </div>
+        </div>
+      }
+    >
+      {children}
+    </Suspense>
   </ErrorBoundary>
 );
 
@@ -40,7 +55,7 @@ export const AppRoutes: React.FC = () => {
     <Routes>
       {/* Public Pages */}
       <Route element={<PublicLayout />}>
-        <Route path="/" element={<SafePage><LandingPage /></SafePage>} />
+        <Route path="/" element={<LandingPage />} />
         <Route path="/menu" element={<SafePage><PublicMenuPage /></SafePage>} />
         <Route path="/survey" element={<SafePage><SurveyPage /></SafePage>} />
         <Route path="/developers" element={<SafePage><AboutDevelopersPage /></SafePage>} />

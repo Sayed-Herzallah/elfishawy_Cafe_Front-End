@@ -9,4 +9,4 @@ Disallow: /pos
 Disallow: /survey/thank-you
 
 # Sitemap
-Sitemap: https://elfishawy-cafe.vercel.app/sitemap.xml
+Sitemap: https://fishawy.vercel.app/sitemap.xml
