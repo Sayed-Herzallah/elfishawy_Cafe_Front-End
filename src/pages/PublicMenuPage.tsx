@@ -143,12 +143,12 @@ export const PublicMenuPage: React.FC = () => {
               const category = getCategoryById(item.categoryId);
               const availableVariants = item.variants.filter((v) => v.isAvailable);
               const priceRange = getItemPriceRange(item);
-              const hasMultiplePrices = priceRange.min !== priceRange.max;
+              const hasMultipleVariants = availableVariants.length > 1;
 
               return (
                 <article
                   key={item.id}
-                  className="bg-white rounded-2xl overflow-hidden border border-gray-100/90 shadow-sm hover:shadow-md transition-all duration-200 flex flex-col"
+                  className="bg-white rounded-2xl overflow-hidden border border-gray-100/90 shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 flex flex-col"
                 >
                   <div className="relative aspect-4/3 w-full bg-gray-100 overflow-hidden">
                     <img
@@ -167,12 +167,14 @@ export const PublicMenuPage: React.FC = () => {
                           الأكثر طلباً
                         </span>
                       )}
-                      {category && (
-                        <span className="text-[10px] font-bold py-1 px-2.5 rounded-md shadow-xs bg-white/90 text-gray-700">
+                    </div>
+                    {category && (
+                      <div className="absolute bottom-2.5 right-2.5">
+                        <span className="text-[10px] font-bold py-1 px-2.5 rounded-md shadow-xs bg-white/95 text-gray-700">
                           {category.icon} {category.name}
                         </span>
-                      )}
-                    </div>
+                      </div>
+                    )}
                   </div>
 
                   <div className="p-4 text-right flex flex-col flex-1">
@@ -181,29 +183,32 @@ export const PublicMenuPage: React.FC = () => {
                       <p className="text-[11px] text-gray-500 mt-1 line-clamp-2 leading-relaxed">{item.description}</p>
                     )}
 
-                    {/* أنواع الصنف مع أسعارها */}
-                    {availableVariants.length > 0 && (
-                      <ul className="mt-3 space-y-1.5 flex-1">
+                    {/* قائمة الأنواع — تظهر فقط لو الصنف له أكثر من نوع وسعر */}
+                    {hasMultipleVariants && (
+                      <ul className="mt-3 flex-1 divide-y divide-dashed divide-gray-100">
                         {availableVariants.map((variant) => (
-                          <li
-                            key={variant.id}
-                            className="flex items-center justify-between bg-[#faf8f5] border border-gray-100 rounded-lg px-3 py-1.5"
-                          >
-                            <span className="text-xs font-bold text-gray-700">{variant.label}</span>
+                          <li key={variant.id} className="flex items-center justify-between py-2">
+                            <span className="text-xs font-bold text-gray-600 flex items-center gap-1.5">
+                              <span className="w-1 h-1 rounded-full bg-[#2e5b9f]/50" />
+                              {variant.label}
+                            </span>
                             <span className="text-sm font-extrabold font-mono text-[#2e5b9f]">
-                              {variant.price} <span className="text-[10px] font-sans font-medium text-gray-500">جنيها</span>
+                              {variant.price}
+                              <span className="text-[10px] font-sans font-medium text-gray-400 mr-1">جنيها</span>
                             </span>
                           </li>
                         ))}
                       </ul>
                     )}
 
-                    <div className="pt-3 mt-3 border-t border-gray-50 flex items-baseline justify-between">
-                      <span className="text-[11px] text-gray-400">
-                        {hasMultiplePrices ? 'يبدأ السعر من' : 'السعر'}
+                    {/* ملخص السعر — مرة واحدة فقط بدون تكرار */}
+                    <div className="pt-3 mt-3 border-t border-gray-100 flex items-center justify-between bg-[#faf8f5] -mx-4 -mb-4 px-4 py-3 rounded-b-2xl">
+                      <span className="text-[11px] text-gray-400 font-bold">
+                        {hasMultipleVariants ? 'يبدأ السعر من' : 'السعر'}
                       </span>
-                      <span className="font-bold text-sm text-[#2e5b9f] font-mono">
-                        {hasMultiplePrices ? `${priceRange.min} - ${priceRange.max}` : priceRange.min} جنيها
+                      <span className="font-extrabold text-base text-[#2e5b9f] font-mono">
+                        {priceRange.min}
+                        <span className="text-[10px] font-sans font-medium text-gray-400 mr-1">جنيها</span>
                       </span>
                     </div>
                   </div>

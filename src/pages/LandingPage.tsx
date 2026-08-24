@@ -1,31 +1,16 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { productService } from '../services/catalogService';
-import { Product } from '../types';
-import { ArrowLeft, Coffee, Heart, Star } from 'lucide-react';
-import { LoadingSkeleton } from '../components/ui/LoadingSkeleton';
+import { MENU_ITEMS, DEFAULT_MENU_IMAGE, getItemPriceRange, getCategoryById } from '../data/menuData';
+import { ArrowLeft, Sparkles } from 'lucide-react';
 
 export const LandingPage: React.FC = () => {
   const navigate = useNavigate();
-  const [featuredProducts, setFeaturedProducts] = useState<Product[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
 
-  useEffect(() => {
-    const fetchFeatured = async () => {
-      try {
-        const res = await productService.listProducts({ inStock: true });
-        if (res.success && res.data) {
-          // Take first 4 products as featured
-          setFeaturedProducts(res.data.slice(0, 4));
-        }
-      } catch (err) {
-        console.error('Error fetching featured products', err);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-    fetchFeatured();
-  }, []);
+  // المنيو ثابت من src/data/menuData.ts — المميزة (الأكثر طلباً) الأول
+  const featuredItems = [
+    ...MENU_ITEMS.filter((item) => item.isPopular),
+    ...MENU_ITEMS.filter((item) => !item.isPopular),
+  ].slice(0, 4);
 
   const moodOptions = [
     { title: 'جلسة طويلة', query: 'coffee' },
@@ -109,7 +94,7 @@ export const LandingPage: React.FC = () => {
         </div>
       </section>
 
-      {/* Featured Menu: "من قائمتنا" - Dynamic from Admin */}
+      {/* Featured Menu: "من قائمتنا" — من المنيو الثابت */}
       <section className="py-20 px-6 max-w-6xl mx-auto w-full">
         <div className="flex items-center justify-between mb-10 pb-4 border-b border-gray-200">
           <Link
@@ -124,55 +109,56 @@ export const LandingPage: React.FC = () => {
           </h2>
         </div>
 
-        {isLoading ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-6">
-            {[1,2,3,4].map((i) => (
-              <LoadingSkeleton key={i} type="tile" count={1} />
-            ))}
-          </div>
-        ) : featuredProducts.length === 0 ? (
-          <div className="text-center py-16 text-gray-400">
-            <Coffee className="w-12 h-12 mx-auto mb-4 opacity-50" />
-            <p className="text-sm">لا توجد منتجات للعرض حالياً</p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-6">
-            {featuredProducts.map((item, idx) => (
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-6">
+          {featuredItems.map((item) => {
+            const category = getCategoryById(item.categoryId);
+            const price = getItemPriceRange(item).min;
+            return (
               <div
-                key={item._id}
+                key={item.id}
                 className="bg-white rounded-2xl overflow-hidden border border-gray-100 shadow-sm hover:shadow-md transition-all duration-200 flex flex-col group cursor-pointer"
                 onClick={() => navigate('/menu')}
               >
                 <div className="aspect-square w-full overflow-hidden bg-gray-100 relative">
                   <img
-                    src={item.image?.secure_url || 'https://images.unsplash.com/photo-1514432324607-a09d9b4aefdd?q=80&w=800&auto=format&fit=crop'}
+                    src={item.image}
                     alt={item.name}
+                    loading="lazy"
+                    onError={(e) => {
+                      e.currentTarget.src = DEFAULT_MENU_IMAGE;
+                    }}
                     className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                   />
-                  <div className="absolute top-2 right-2">
-                    <span className={`text-[10px] font-bold py-1 px-2 rounded ${
-                      item.inStock ? 'bg-[#2e5b9f] text-white' : 'bg-rose-600 text-white'
-                    }`}>
-                      {item.inStock ? 'متوفر' : 'غير متوفر'}
-                    </span>
-                  </div>
+                  {item.isPopular && (
+                    <div className="absolute top-2 right-2">
+                      <span className="inline-flex items-center gap-1 text-[10px] font-bold py-1 px-2 rounded bg-amber-400 text-amber-950">
+                        <Sparkles className="w-3 h-3" />
+                        الأكثر طلباً
+                      </span>
+                    </div>
+                  )}
                 </div>
                 <div className="p-4 text-right flex flex-col justify-between flex-1">
                   <div>
-                    <h3 className="font-bold text-gray-900 text-base">{item.name}</h3>
+                    {category && (
+                      <span className="text-[10px] font-bold text-[#2e5b9f] bg-[#2e5b9f]/[0.07] px-2 py-0.5 rounded">
+                        {category.icon} {category.name}
+                      </span>
+                    )}
+                    <h3 className="font-bold text-gray-900 text-base mt-1.5">{item.name}</h3>
                     {item.description && (
                       <p className="text-xs text-gray-400 mt-0.5 line-clamp-2">{item.description}</p>
                     )}
                   </div>
                   <div className="pt-3 mt-2 border-t border-gray-50 flex items-center justify-between">
                     <span className="text-xs text-gray-400">السعر</span>
-                    <span className="font-bold text-sm text-[#2e5b9f]">{item.price} جنيها</span>
+                    <span className="font-bold text-sm text-[#2e5b9f] font-mono">{price} جنيها</span>
                   </div>
                 </div>
               </div>
-            ))}
-          </div>
-        )}
+            );
+          })}
+        </div>
       </section>
 
       {/* Mood Selector: "اختر ما يناسب مزاجك" */}

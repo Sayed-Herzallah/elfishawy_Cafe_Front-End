@@ -148,6 +148,17 @@ function getCurrentPreset(range: DateRange): PresetRange {
   return 'custom';
 }
 
+/**
+ * ✅ تطبيع التاريخ القادم من التخزين المحلي — usePersistentState بيحفظ JSON
+ * فبعد أي Refresh التواريخ بترجع Strings وده كان بيكسر الصفحة بـ
+ * "d.getFullYear is not a function". هنا بنضمن إنها دايمًا Date صالحة.
+ */
+function toSafeDate(value: Date | null | undefined): Date | null {
+  if (!value) return null;
+  const d = value instanceof Date ? new Date(value.getTime()) : new Date(value as unknown as string);
+  return isNaN(d.getTime()) ? null : d;
+}
+
 const ARABIC_MONTHS = [
   'يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
   'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر',
@@ -165,8 +176,15 @@ export const DateRangeFilter: React.FC<DateRangeFilterProps> = ({
   showPresets = true,
   locale = 'ar-EG-u-nu-latn',
 }) => {
+  // ✅ القيمة الوحيدة المستخدمة داخل المكون — دايمًا Dates صالحة حتى لو التخزين رجّع Strings
+  const safeValue: DateRange = {
+    from: toSafeDate(value.from),
+    to: toSafeDate(value.to),
+    preset: value.preset,
+  };
+
   const [viewMonth, setViewMonth] = useState(() => {
-    const d = value.from || new Date();
+    const d = toSafeDate(value.from) || new Date();
     return new Date(d.getFullYear(), d.getMonth(), 1);
   });
 
@@ -176,7 +194,7 @@ export const DateRangeFilter: React.FC<DateRangeFilterProps> = ({
   const rootRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
-  const currentPreset = useMemo(() => getCurrentPreset(value), [value]);
+  const currentPreset = useMemo(() => getCurrentPreset(safeValue), [safeValue]);
 
   // قفل النافذة عند الضغط خارجها أو الضغط على Escape
   useEffect(() => {
@@ -233,8 +251,8 @@ export const DateRangeFilter: React.FC<DateRangeFilterProps> = ({
     // 1) أول ضغطة تحدد بداية النطاق وتبقى النافذة مفتوحة لاختيار النهاية.
     // 2) الضغط على نفس تاريخ البداية مرة أخرى = اختيار يوم واحد فقط ويغلق فوراً.
     // 3) الضغط على تاريخ مختلف = يكمل النطاق ويغلق.
-    if (value.from && !value.to) {
-      const fromDate = new Date(value.from);
+    if (safeValue.from && !safeValue.to) {
+      const fromDate = new Date(safeValue.from);
       fromDate.setHours(0, 0, 0, 0);
       if (fromDate.getTime() === date.getTime()) {
         onChange({ from: date, to: date, preset: 'custom' });
@@ -242,9 +260,9 @@ export const DateRangeFilter: React.FC<DateRangeFilterProps> = ({
         return;
       }
       if (date < fromDate) {
-        onChange({ from: date, to: value.from, preset: 'custom' });
+        onChange({ from: date, to: safeValue.from, preset: 'custom' });
       } else {
-        onChange({ from: value.from, to: date, preset: 'custom' });
+        onChange({ from: safeValue.from, to: date, preset: 'custom' });
       }
       setIsOpen(false);
     } else {
@@ -280,9 +298,9 @@ export const DateRangeFilter: React.FC<DateRangeFilterProps> = ({
     : null;
   const maxDateNormalized = new Date(maxDate.getFullYear(), maxDate.getMonth(), maxDate.getDate());
 
-  const hasFullRange = Boolean(value.from && value.to);
+  const hasFullRange = Boolean(safeValue.from && safeValue.to);
   const rangeDaysCount =
-    value.from && value.to ? countDays(value.from, value.to) : 0;
+    safeValue.from && safeValue.to ? countDays(safeValue.from, safeValue.to) : 0;
 
   interface DayState {
     isEndpoint: boolean;
@@ -296,14 +314,14 @@ export const DateRangeFilter: React.FC<DateRangeFilterProps> = ({
     const date = new Date(viewMonth.getFullYear(), viewMonth.getMonth(), day);
 
     const isToday = date.getTime() === today.getTime();
-    const isFromSelected = value.from && isSameDay(date, new Date(value.from));
-    const isToSelected = value.to && isSameDay(date, new Date(value.to));
+    const isFromSelected = safeValue.from && isSameDay(date, new Date(safeValue.from));
+    const isToSelected = safeValue.to && isSameDay(date, new Date(safeValue.to));
     // معاينة حية للنطاق أثناء التمرير قبل اختيار تاريخ النهاية
-    const rangeEnd = value.to || (value.from && !value.to ? hoveredDate : null);
+    const rangeEnd = safeValue.to || (safeValue.from && !safeValue.to ? hoveredDate : null);
     let isInRange = false;
-    if (value.from && rangeEnd && !isFromSelected && !isToSelected) {
-      const start = Math.min(normalizeDay(new Date(value.from)), normalizeDay(rangeEnd));
-      const end = Math.max(normalizeDay(new Date(value.from)), normalizeDay(rangeEnd));
+    if (safeValue.from && rangeEnd && !isFromSelected && !isToSelected) {
+      const start = Math.min(normalizeDay(new Date(safeValue.from)), normalizeDay(rangeEnd));
+      const end = Math.max(normalizeDay(new Date(safeValue.from)), normalizeDay(rangeEnd));
       const t = normalizeDay(date);
       isInRange = t >= start && t <= end;
     }
@@ -374,27 +392,27 @@ export const DateRangeFilter: React.FC<DateRangeFilterProps> = ({
           <span className="text-[9px] font-bold text-gray-400 tracking-wide select-none">
             الفترة الزمنية
           </span>
-          {value.from && value.to ? (
+          {safeValue.from && safeValue.to ? (
             <span className="flex items-center gap-1.5 w-full min-w-0">
               <span className="font-mono font-bold text-xs text-gray-900 truncate">
-                {formatShortDate(value.from)} <span className="text-[#2e5b9f]">←</span>{' '}
-                {formatShortDate(value.to)}
+                {formatShortDate(safeValue.from)} <span className="text-[#2e5b9f]">←</span>{' '}
+                {formatShortDate(safeValue.to)}
               </span>
               <span className="hidden sm:inline-flex items-center gap-0.5 shrink-0 text-[9px] font-bold text-[#2e5b9f] bg-[#2e5b9f]/[0.07] border border-[#2e5b9f]/20 px-1.5 py-px rounded-full">
                 <PresetIcon className="w-2.5 h-2.5" />
                 {PRESET_LABELS[currentPreset]}
               </span>
             </span>
-          ) : value.from && !value.to ? (
+          ) : safeValue.from && !safeValue.to ? (
             <span className="font-mono font-bold text-xs text-[#2e5b9f] truncate animate-pulse">
-              من {formatShortDate(value.from)} — اختر النهاية...
+              من {formatShortDate(safeValue.from)} — اختر النهاية...
             </span>
           ) : (
             <span className="text-xs font-bold text-gray-400 truncate">كل الفترات</span>
           )}
         </span>
 
-        {value.from || value.to ? (
+        {safeValue.from || safeValue.to ? (
           <span
             role="button"
             aria-label="مسح النطاق"
@@ -428,9 +446,9 @@ export const DateRangeFilter: React.FC<DateRangeFilterProps> = ({
           {/* ── الهيدر: سطر واحد ── */}
           <div className="bg-gradient-to-l from-[#1d4277] via-[#2e5b9f] to-[#4a7cc9] px-3 py-2 text-white flex items-center justify-between gap-2">
             <p className="text-[11px] font-bold font-mono truncate drop-shadow-sm">
-              {value.from ? formatDate(value.from, locale) : '———'}{' '}
+              {safeValue.from ? formatDate(safeValue.from, locale) : '———'}{' '}
               <span className="text-white/50">←</span>{' '}
-              {value.to ? formatDate(value.to, locale) : '———'}
+              {safeValue.to ? formatDate(safeValue.to, locale) : '———'}
             </p>
             {hasFullRange && (
               <span className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-white/15 border border-white/25">
@@ -566,7 +584,7 @@ export const DateRangeFilter: React.FC<DateRangeFilterProps> = ({
           {/* ── الفوتر: ملخص + مسح ── */}
           <div className="flex items-center justify-between gap-2 px-3 py-1.5 bg-[#faf8f5]/80 border-t border-gray-100">
             <span className="text-[9.5px] text-gray-500 font-mono truncate">
-              {value.from && !value.to ? (
+              {safeValue.from && !safeValue.to ? (
                 <span className="text-[#2e5b9f] font-bold">اختر تاريخ النهاية لإتمام النطاق</span>
               ) : hasFullRange ? (
                 <>
@@ -576,7 +594,7 @@ export const DateRangeFilter: React.FC<DateRangeFilterProps> = ({
                 'لم يتم اختيار فترة بعد'
               )}
             </span>
-            {(value.from || value.to) && (
+            {(safeValue.from || safeValue.to) && (
               <button
                 type="button"
                 onClick={handleClear}
