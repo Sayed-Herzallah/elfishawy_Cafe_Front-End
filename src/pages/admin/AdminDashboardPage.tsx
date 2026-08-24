@@ -484,6 +484,20 @@ export const AdminDashboardPage: React.FC = () => {
     return Array.from(map.values()).sort((a, b) => b.amount - a.amount);
   })();
 
+  // 🧾 آخر عمليات الشراء والتوريد — مين عمل إيه وإمتى (أحدث 5 قيود مشتريات)
+  const recentPurchases = periodExpenses
+    .filter((e) => e.category === 'inventory')
+    .sort((a, b) => new Date(b.date || b.createdAt || '').getTime() - new Date(a.date || a.createdAt || '').getTime())
+    .slice(0, 5);
+
+  const addedByLabelOf = (e: Expense): string =>
+    typeof e.addedBy === 'object' ? e.addedBy.userName : e.addedBy || 'المدير';
+
+  const linkedItemNameOf = (e: Expense): string => {
+    const linked = e.inventoryItemLinked;
+    return typeof linked === 'object' && linked !== null ? linked.name : '';
+  };
+
   // 😴 المنتجات الراكدة — موجودة في المنيو لكن مبيعاتها صفر في الفترة المختارة
   const soldProductIds = new Set<string>();
   filteredOrders.forEach((o) => {
@@ -896,6 +910,43 @@ export const AdminDashboardPage: React.FC = () => {
               })}
             </div>
           )}
+
+          {/* 🧾 آخر عمليات الشراء والتوريد — مين عمل إيه وإمتى */}
+          {recentPurchases.length > 0 && (
+            <div className="pt-3 border-t border-gray-100 space-y-1.5">
+              <span className="text-[10px] text-gray-400 font-bold block">
+                🧾 آخر عمليات الشراء والتوريد — بواسطة مين
+              </span>
+              {recentPurchases.map((log) => {
+                const itemName = linkedItemNameOf(log);
+                return (
+                  <div
+                    key={log._id}
+                    className="text-[11px] bg-[#faf8f5] border border-gray-100 rounded-xl px-2.5 py-1.5 flex items-center justify-between gap-2"
+                  >
+                    <span className="font-bold text-gray-800 truncate min-w-0">
+                      ✅ تم {itemName ? 'توريد' : 'شراء'}
+                      {log.inventoryQuantityAdded ? (
+                        <span className="font-mono text-emerald-700"> +{formatNumber(log.inventoryQuantityAdded)}</span>
+                      ) : null}
+                      {itemName ? (
+                        <span className="text-gray-500"> — {itemName}</span>
+                      ) : (
+                        <span className="text-gray-500 font-normal"> — {log.description.slice(0, 40)}</span>
+                      )}
+                    </span>
+                    <span className="flex items-center gap-2 shrink-0 font-mono text-[10px] text-gray-400">
+                      <span className="font-bold text-[#2e5b9f]">{formatPrice(log.amount)}</span>
+                      <span>
+                        بواسطة <span className="font-bold text-gray-700 font-sans">{addedByLabelOf(log)}</span>
+                      </span>
+                      <span>{formatDate(log.date || log.createdAt)}</span>
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         {/* 😴 منتجات راكدة (5 cols) */}
@@ -1043,6 +1094,7 @@ export const AdminDashboardPage: React.FC = () => {
         order={selectedOrder}
         isOpen={!!selectedOrder}
         onClose={() => setSelectedOrder(null)}
+        products={allProducts}
       />
 
       {/* PDF / Excel Export Modal */}

@@ -8,9 +8,11 @@ interface ReceiptModalProps {
   order: Order | null;
   isOpen: boolean;
   onClose: () => void;
+  /** ✅ قائمة المنتجات — لحل أسماء الأصناف لما الـ API يرجّع product كـ ID بس */
+  products?: Array<{ _id: string; name: string }>;
 }
 
-export const ReceiptModal: React.FC<ReceiptModalProps> = ({ order, isOpen, onClose }) => {
+export const ReceiptModal: React.FC<ReceiptModalProps> = ({ order, isOpen, onClose, products }) => {
   if (!isOpen || !order) return null;
 
   const handlePrint = () => {
@@ -26,6 +28,17 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ order, isOpen, onClo
 
   const receiptItems = Array.isArray(order.items) ? order.items : [];
   const totalItemsCount = receiptItems.reduce((acc, item) => acc + (item?.quantity || 0), 0);
+
+  // ✅ خريطة أسماء المنتجات — عشان الفاتورة تعرض اسم المشروب الحقيقي مش "صنف"
+  const productNameById = new Map<string, string>(
+    (products || []).map((p) => [p._id, p.name])
+  );
+
+  const resolveProductName = (item: any): string => {
+    if (!item || !item.product) return 'صنف';
+    if (typeof item.product === 'object') return (item.product as any).name || 'صنف';
+    return productNameById.get(String(item.product)) || 'صنف محذوف من المنيو';
+  };
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto flex items-center justify-center p-4">
@@ -81,7 +94,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ order, isOpen, onClo
             </div>
             <div className="space-y-3">
               {receiptItems.map((item, idx) => {
-                const prodName = item && typeof item.product === 'object' && item.product ? (item.product as any).name : 'صنف';
+                const prodName = resolveProductName(item);
                 return (
                   <div key={idx} className="flex justify-between items-center text-sm py-0.5" dir="rtl">
                     <span className="font-bold text-gray-800 text-sm">

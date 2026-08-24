@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { orderService } from '../../services/opsService';
-import { Order, OrderStatus } from '../../types';
+import { productService } from '../../services/catalogService';
+import { Order, OrderStatus, Product } from '../../types';
 import { Badge } from '../../components/ui/Badge';
 import { StatCard } from '../../components/ui/StatCard';
 import { ReceiptModal } from '../../components/ui/ReceiptModal';
@@ -35,6 +36,7 @@ import {
 
 export const AdminSalesPage: React.FC = () => {
   const [orders, setOrders] = useState<Order[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [statusFilter, setStatusFilter] = useState<'all' | OrderStatus>('all');
@@ -73,6 +75,10 @@ export const AdminSalesPage: React.FC = () => {
 
   useEffect(() => {
     loadOrders();
+    // ✅ المنتجات لحل أسماء الأصناف في الفواتير (لو الـ API رجّع product كـ ID)
+    productService.listProducts()
+      .then((res) => { if (res.success && res.data) setProducts(res.data); })
+      .catch(() => { /* تجاهل — الأسماء هتفضل من الطلب نفسه */ });
   }, []);
 
   useEffect(() => {
@@ -302,14 +308,15 @@ export const AdminSalesPage: React.FC = () => {
               <tbody className="divide-y divide-gray-100 text-gray-800">
                 {paginatedOrders.map((order) => {
                   const safeItems = Array.isArray(order.items) ? order.items : [];
+                  const productNameById = new Map<string, string>(products.map((p) => [p._id, p.name]));
+                  const resolveName = (it: any): string =>
+                    it && typeof it.product === 'object' && it.product
+                      ? (it.product as any).name || 'صنف'
+                      : productNameById.get(String(it?.product)) || 'صنف محذوف';
                   const itemsLabel =
                     safeItems
                       .slice(0, 2)
-                      .map((it) =>
-                        it && typeof it.product === 'object' && it.product
-                          ? (it.product as any).name
-                          : 'منتج'
-                      )
+                      .map((it) => resolveName(it))
                       .join('، ') +
                     (safeItems.length > 2 ? ` +${safeItems.length - 2}` : '');
                   return (
@@ -506,6 +513,7 @@ export const AdminSalesPage: React.FC = () => {
         isOpen={!!selectedReceiptOrder}
         onClose={() => setSelectedReceiptOrder(null)}
         order={selectedReceiptOrder}
+        products={products}
       />
 
       {/* Edit Order Modal */}

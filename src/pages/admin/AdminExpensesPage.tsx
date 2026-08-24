@@ -14,7 +14,7 @@ import { LoadingSkeleton } from '../../components/ui/LoadingSkeleton';
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { Pagination } from '../../components/ui/Pagination';
 import { ProfessionalCard, ExpenseCard } from '../../components/ui/ProfessionalCard';
-import { formatPrice, formatNumber, formatDate } from '../../utils/formatters';
+import { formatPrice, formatNumber, formatDate, formatDateTime } from '../../utils/formatters';
 import {
   ReceiptText,
   DollarSign,
@@ -157,6 +157,8 @@ export const AdminExpensesPage: React.FC = () => {
           formData.category === 'inventory' && formData.inventoryQuantityAdded
             ? Number(formData.inventoryQuantityAdded)
             : undefined,
+        // إجمالي الفاتورة = المبلغ — الباك إند بيرفع سعر تكلفة الصنف منه
+        totalCost: Number(formData.amount),
         date: formData.date ? new Date(formData.date).toISOString() : new Date().toISOString(),
       });
 
@@ -219,6 +221,8 @@ export const AdminExpensesPage: React.FC = () => {
           editFormData.category === 'inventory' && editFormData.inventoryQuantityAdded
             ? Number(editFormData.inventoryQuantityAdded)
             : undefined,
+        // إجمالي الفاتورة = المبلغ — عشان سعر الوحدة يتحدث على القيد والصنف
+        totalCost: Number(editFormData.amount),
         date: editFormData.date ? new Date(editFormData.date).toISOString() : undefined,
       });
 
@@ -346,6 +350,37 @@ export const AdminExpensesPage: React.FC = () => {
     });
     return Array.from(map.values()).sort((a, b) => b.amount - a.amount);
   }, [filteredExpenses]);
+
+  // 💰 سعر وحدة كل مشتريات + السعر اللي قبله (القديم) — عشان إظهار تغيّر السعر بتاريخ كل توريد
+  const purchasePriceInfo = useMemo(() => {
+    const unitPrice = new Map<string, number>();
+    const prevPrice = new Map<string, number>();
+    const purchases = expenses
+      .filter(
+        (e) =>
+          e.category === 'inventory' &&
+          e.inventoryItemLinked &&
+          typeof e.inventoryItemLinked === 'object' &&
+          (e.inventoryQuantityAdded || 0) > 0
+      )
+      .slice()
+      .sort((a, b) => new Date(b.date || b.createdAt || '').getTime() - new Date(a.date || a.createdAt || '').getTime());
+    // المشي من الأقدم للأحدث: السعر السابق = آخر سعر مسجّل لنفس الصنف قبله
+    const lastPriceByItem = new Map<string, number>();
+    for (let i = purchases.length - 1; i >= 0; i--) {
+      const e = purchases[i];
+      const key = (e.inventoryItemLinked as InventoryItem)._id;
+      const price =
+        e.unitCost && e.unitCost > 0
+          ? e.unitCost
+          : Number(((e.amount || 0) / (e.inventoryQuantityAdded || 1)).toFixed(2));
+      const older = lastPriceByItem.get(key);
+      if (older !== undefined) prevPrice.set(e._id, older);
+      unitPrice.set(e._id, price);
+      lastPriceByItem.set(key, price);
+    }
+    return { unitPrice, prevPrice };
+  }, [expenses]);
 
   // توزيع الفئات المعروضة نسبياً على إجمالي المعروض
   const shownCategoryTotals = filteredExpenses.reduce((acc, e) => {
@@ -643,7 +678,7 @@ export const AdminExpensesPage: React.FC = () => {
                   <ExpenseCard
                     key={exp._id}
                     id={exp._id}
-                    status={exp.amount > 10000 ? 'processing' : 'completed'}
+                    status="completed"
                     title={exp.description}
                     subtitle={formatDate(exp.date || exp.createdAt)}
                     onClick={() => setViewingExpense(exp)}
@@ -652,10 +687,22 @@ export const AdminExpensesPage: React.FC = () => {
                     }}
                     metadata={[
                       { label: 'الفئة', value: categoryLabels[exp.category] || exp.category },
+                      { label: 'بواسطة', value: authorName },
                     ]}
-                    
-                    
-                    tags={exp.inventoryQuantityAdded ? [`+${formatNumber(exp.inventoryQuantityAdded)} وحدة للمخزن`] : []}
+
+
+                    tags={
+                      exp.inventoryQuantityAdded
+                        ? [
+                            `تم توريد +${formatNumber(exp.inventoryQuantityAdded)} وحدة`,
+                            `سعر الوحدة: ${formatPrice(purchasePriceInfo.unitPrice.get(exp._id) || 0)}`,
+                            ...((purchasePriceInfo.prevPrice.get(exp._id) !== undefined &&
+                              Math.abs((purchasePriceInfo.prevPrice.get(exp._id) || 0) - (purchasePriceInfo.unitPrice.get(exp._id) || 0)) > 0.009
+                              ? [`📈 سعر جديد بدلاً من ${formatPrice(purchasePriceInfo.prevPrice.get(exp._id) || 0)}`]
+                              : []) as string[]),
+                          ]
+                        : []
+                    }
                                         actions={[
                       {
                         icon: <Edit2 className="w-3.5 h-3.5" />,
@@ -1005,11 +1052,17 @@ export const AdminExpensesPage: React.FC = () => {
               {viewingExpense.inventoryItemLinked && (
                 <div className="p-3 bg-white rounded-xl border border-gray-200 col-span-1 sm:col-span-2 space-y-1">
                   <span className="text-[10px] text-gray-400 font-bold block">تفاصيل التوريد المرتبط</span>
-                  <div className="text-xs text-gray-700 bg-gray-50 rounded-lg p-2 flex items-center justify-between">
+                  <div className="text-xs text-gray-700 bg-emerald-50/70 border border-emerald-100 rounded-lg p-2 flex items-center justify-between">
                     <span>
-                      تحديث رصيد المخزن بمقدار:{' '}
+                      ✅ تم توريد{' '}
                       <span className="font-bold text-emerald-700 font-mono">
                         +{formatNumber(viewingExpense.inventoryQuantityAdded || 0)}
+                      </span>{' '}
+                      وحدة للمخزن بواسطة{' '}
+                      <span className="font-bold text-gray-900">
+                        {typeof viewingExpense.addedBy === 'object'
+                          ? viewingExpense.addedBy.userName
+                          : viewingExpense.addedBy || 'المدير'}
                       </span>
                     </span>
                     <span className="font-bold text-gray-900">
@@ -1017,6 +1070,23 @@ export const AdminExpensesPage: React.FC = () => {
                       {typeof viewingExpense.inventoryItemLinked === 'object' && viewingExpense.inventoryItemLinked !== null
                         ? (viewingExpense.inventoryItemLinked as any).name || String((viewingExpense.inventoryItemLinked as any)._id).slice(-8)
                         : String(viewingExpense.inventoryItemLinked).slice(-8)}
+                    </span>
+                  </div>
+                  <div className="text-xs text-gray-700 bg-blue-50/70 border border-blue-100 rounded-lg p-2 flex items-center justify-between">
+                    <span>
+                      سعر الوحدة في التوريد:{' '}
+                      <span className="font-bold font-mono text-[#2e5b9f]">
+                        {formatPrice(purchasePriceInfo.unitPrice.get(viewingExpense._id) || 0)}
+                      </span>
+                      {purchasePriceInfo.prevPrice.get(viewingExpense._id) !== undefined &&
+                        Math.abs((purchasePriceInfo.prevPrice.get(viewingExpense._id) || 0) - (purchasePriceInfo.unitPrice.get(viewingExpense._id) || 0)) > 0.009 && (
+                          <span className="font-bold text-amber-700">
+                            {' '}(سعر جديد بدلاً من {formatPrice(purchasePriceInfo.prevPrice.get(viewingExpense._id) || 0)})
+                          </span>
+                        )}
+                    </span>
+                    <span className="font-mono text-gray-500 whitespace-nowrap">
+                      {formatDateTime(viewingExpense.date || viewingExpense.createdAt)}
                     </span>
                   </div>
                 </div>

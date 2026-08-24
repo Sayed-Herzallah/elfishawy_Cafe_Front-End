@@ -63,6 +63,7 @@ export const inventoryService = {
     unit: string;
     minLimit: number;
     costPrice?: number;
+    totalCost?: number;
   }): Promise<ApiResponse<InventoryItem>> => {
     return ApiClient.request<InventoryItem>('/inventory', {
       method: 'POST',
@@ -85,6 +86,7 @@ export const inventoryService = {
     name?: string;
     unit?: string;
     minLimit?: number;
+    costPrice?: number;
   }): Promise<ApiResponse<InventoryItem>> => {
     return ApiClient.request<InventoryItem>(`/inventory/${id}`, {
       method: 'PATCH',
@@ -108,6 +110,8 @@ export const expenseService = {
     category: 'rent' | 'salaries' | 'utilities' | 'inventory' | 'other';
     inventoryItemLinked?: string;
     inventoryQuantityAdded?: number;
+    totalCost?: number;
+    unitCost?: number;
     date?: string;
   }): Promise<ApiResponse<Expense>> => {
     return ApiClient.request<Expense>('/expenses', {
@@ -126,6 +130,7 @@ export const expenseService = {
     category?: 'rent' | 'salaries' | 'utilities' | 'inventory' | 'other';
     inventoryItemLinked?: string;
     inventoryQuantityAdded?: number;
+    totalCost?: number;
     date?: string;
   }): Promise<ApiResponse<Expense>> => {
     return ApiClient.request<Expense>(`/expenses/${id}`, {

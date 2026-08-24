@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { inventoryService, expenseService } from '../../services/opsService';
-import { InventoryItem } from '../../types';
+import { InventoryItem, Expense } from '../../types';
 import { useNotification } from '../../contexts/NotificationContext';
+import { useAuth } from '../../contexts/AuthContext';
 import { syncProductStockAfterRestock } from '../../utils/stockSync';
+import { addRestockJournalEntry, purchaseSummary } from '../../utils/restockJournal';
 import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
@@ -33,13 +35,13 @@ export const CashierInventoryPage: React.FC = () => {
   const [selectedItem, setSelectedItem] = useState<InventoryItem | null>(null);
 
   // Add Item Form Data
-  const [formData, setFormData] = useState({ name: '', quantity: '10', unit: 'KG', minLimit: '5' });
-  const [formErrors, setFormErrors] = useState<{ name?: string; quantity?: string; minLimit?: string }>({});
+  const [formData, setFormData] = useState({ name: '', quantity: '10', unit: 'KG', minLimit: '5', totalCost: '' });
+  const [formErrors, setFormErrors] = useState<{ name?: string; quantity?: string; minLimit?: string; totalCost?: string }>({});
 
   // Purchase/Restock Form Data (Linked to real backend expenses)
+  // سعر تكلفة الوحدة بيتحسب تلقائياً: الإجمالي ÷ الكمية — مش محتاج إدخال يدوي
   const [purchaseFormData, setPurchaseFormData] = useState({
     quantity: '10',
-    unitCost: '',
     totalAmount: '',
     supplierName: '',
     invoiceNumber: '',
@@ -49,9 +51,43 @@ export const CashierInventoryPage: React.FC = () => {
   const [purchaseErrors, setPurchaseErrors] = useState<{ quantity?: string; totalAmount?: string }>({});
 
   const { showToast, showError } = useNotification();
+  const { user } = useAuth();
 
   // Use inventory sync hook with real-time polling
   const { items, lowStockItems, outOfStockItems, isLoading, refetch } = useInventorySync(30000);
+
+  // 🧾 قيود الشراء — لاستخراج آخر مورد لكل صنف (زي صفحة المشتريات) — أفضل جهد
+  const [purchaseLogs, setPurchaseLogs] = useState<Expense[]>([]);
+  useEffect(() => {
+    expenseService.listExpenses()
+      .then((res) => {
+        if (res.success && res.data) {
+          setPurchaseLogs(res.data.filter((e) => e.category === 'inventory'));
+        }
+      })
+      .catch(() => { /* تجاهل — عرض المورد تحسيني */ });
+  }, []);
+
+  /** استخراج اسم المورد من وصف قيد الشراء بصيغة [مورد: ...] — زي صفحة المشتريات */
+  const parseSupplier = (desc: string): string => {
+    const m = (desc || '').match(/\[مورد:\s*([^\]]+)\]/);
+    return m ? m[1].trim() : '';
+  };
+
+  const lastSupplierByItem = (() => {
+    const map = new Map<string, string>();
+    purchaseLogs
+      .slice()
+      .sort((a, b) => new Date(b.date || b.createdAt || '').getTime() - new Date(a.date || a.createdAt || '').getTime())
+      .forEach((e) => {
+        const linked = e.inventoryItemLinked;
+        if (typeof linked === 'object' && linked !== null && !map.has(linked._id)) {
+          const supplier = parseSupplier(e.description || '');
+          if (supplier) map.set(linked._id, supplier);
+        }
+      });
+    return map;
+  })();
 
   // Computed values from hook data
   const lowStockCount = lowStockItems.length;
@@ -63,7 +99,7 @@ export const CashierInventoryPage: React.FC = () => {
   // Handle Add new Inventory Item
   const handleCreateItem = async (e: React.FormEvent) => {
     e.preventDefault();
-    const errors: { name?: string; quantity?: string; minLimit?: string } = {};
+    const errors: { name?: string; quantity?: string; minLimit?: string; totalCost?: string } = {};
 
     if (!formData.name.trim()) {
       errors.name = 'اسم الصنف مطلوب';
@@ -73,6 +109,10 @@ export const CashierInventoryPage: React.FC = () => {
     }
     if (formData.minLimit === '' || Number(formData.minLimit) < 1) {
       errors.minLimit = 'الرجاء تحديد حد أدنى صحيح (1 أو أكثر)';
+    }
+    // ✅ التكلفة الإجمالية إجبارية
+    if (formData.totalCost === '' || Number(formData.totalCost) <= 0) {
+      errors.totalCost = 'التكلفة الإجمالية مطلوبة ويجب أن تكون أكبر من صفر';
     }
 
     if (Object.keys(errors).length > 0) {
@@ -85,17 +125,20 @@ export const CashierInventoryPage: React.FC = () => {
 
     try {
       setIsSubmitting(true);
+      const qtyNum = Number(formData.quantity) || 0;
       const res = await inventoryService.createItem({
         name: formData.name.trim(),
-        quantity: Number(formData.quantity) || 0,
+        quantity: qtyNum,
         unit: formData.unit,
         minLimit: Number(formData.minLimit) || 5,
+        // ✅ الإجمالي بيتبعت للباك إند وهو بيحسب سعر تكلفة الوحدة (الإجمالي ÷ الكمية) ويسجل رصيد افتتاحي في المشتريات
+        totalCost: formData.totalCost ? Number(formData.totalCost) : undefined,
       });
 
       if (res.success) {
         showToast('تمت إضافة صنف المخزون بنجاح');
         setIsAddModalOpen(false);
-        setFormData({ name: '', quantity: '10', unit: 'KG', minLimit: '5' });
+        setFormData({ name: '', quantity: '10', unit: 'KG', minLimit: '5', totalCost: '' });
         refetch();
       }
     } catch (err) {
@@ -109,12 +152,11 @@ export const CashierInventoryPage: React.FC = () => {
   const handleOpenPurchaseModal = (item: InventoryItem) => {
     setSelectedItem(item);
     setPurchaseErrors({});
-    const initialUnitCost = item.costPrice ? String(item.costPrice) : '150';
+    // الإجمالي المبدئي = سعر تكلفة الوحدة الحالي × 10 (الكمية الافتراضية)
     const initialQty = '10';
-    const initialTotal = String((Number(initialUnitCost) || 0) * (Number(initialQty) || 0));
+    const initialTotal = item.costPrice ? String(Number((item.costPrice * 10).toFixed(2))) : '';
     setPurchaseFormData({
       quantity: initialQty,
-      unitCost: initialUnitCost,
       totalAmount: initialTotal,
       supplierName: '',
       invoiceNumber: '',
@@ -147,24 +189,43 @@ export const CashierInventoryPage: React.FC = () => {
 
     try {
       setIsSubmitting(true);
-      const desc = `[شراء بضاعة] ${selectedItem.name} - كمية: ${qty} ${selectedItem.unit}${
-        purchaseFormData.supplierName ? ` (مورد: ${purchaseFormData.supplierName.trim()})` : ''
-      }${
-        purchaseFormData.invoiceNumber ? ` (فاتورة #${purchaseFormData.invoiceNumber.trim()})` : ''
-      }`;
+      // 🧹 اسم/بيان الشراء نظيف واحترافي (مش "تعبئة مخزون" ولا "شراء بضاعة") —
+      // بيظهر في المشتريات كاسم المادة المختارة مع الكمية والمورد والفاتورة.
+      const supplierTag = purchaseFormData.supplierName
+        ? ` [مورد: ${purchaseFormData.supplierName.trim()}]`
+        : '';
+      const invoiceTag = purchaseFormData.invoiceNumber
+        ? ` (فاتورة #${purchaseFormData.invoiceNumber.trim()})`
+        : '';
+      const desc = `${selectedItem.name} — شراء ${qty} ${selectedItem.unit}${supplierTag}${invoiceTag}`;
 
         const expRes = await expenseService.createExpense({
-          description: `تعبئة مخزون: ${selectedItem.name} - ${desc}`,
+          description: desc,
           amount: total,
           category: 'inventory',
           inventoryItemLinked: selectedItem._id,
           inventoryQuantityAdded: qty,
+          // الإجمالي وسعر الوحدة بيتسجلوا على القيد — الباك إند بيرفع سعر تكلفة الصنف تلقائياً
+          totalCost: total,
+          unitCost: qty > 0 ? Number((total / qty).toFixed(2)) : undefined,
           date: new Date().toISOString(),
         });
 
       if (expRes.success) {
         showToast(`تم توريد ${qty} ${selectedItem.unit} بنجاح وتسجيل المصروفات بقيمة ${total} جنيها`);
         setIsPurchaseModalOpen(false);
+
+        // 📓 تسجيل التوريد في اليومية المحلية باسم الكاشير والسعر — احتياط لو قيد السيرفر ناقص
+        addRestockJournalEntry({
+          itemId: selectedItem._id,
+          date: new Date().toISOString(),
+          qty,
+          totalCost: total,
+          unitCost: qty > 0 ? Number((total / qty).toFixed(2)) : undefined,
+          by: user?.userName || 'الكاشير',
+          byRole: 'cashier',
+          source: 'cashier-purchase',
+        });
 
         // ✅ Auto-sync product stockQuantity for all products linked to this inventory item
         const updatedCount = await syncProductStockAfterRestock(selectedItem._id);
@@ -173,12 +234,31 @@ export const CashierInventoryPage: React.FC = () => {
         }
 
         refetch();
+        // 🔄 تحديث سجل المشتريات المحلي فوراً — عشان التكلفة الإجمالية والمتوسط يتحدثوا في الجدول
+        expenseService
+          .listExpenses()
+          .then((lres) => {
+            if (lres.success && lres.data) {
+              setPurchaseLogs(lres.data.filter((x) => x.category === 'inventory'));
+            }
+          })
+          .catch(() => { /* تجاهل — العرض هيتحدث على التحديث التالي */ });
       }
     } catch (err) {
       showError(err);
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  /** 💰 التكلفة الصحيحة للصنف من فواتير الشراء الفعلية (مش من سعر آخر توريد بس):
+   * الإجمالي المستثمر = Σ كل الفواتير المرتبطة بالصنف (مثال: ٢٠٠٠ + ٣٣٠٠ = ٥٣٠٠ ✅)
+   * متوسط سعر الوحدة = الإجمالي ÷ إجمالي الكمية المشتراة */
+  const costSummaryFor = (item: InventoryItem) => {
+    const p = purchaseSummary(item._id, purchaseLogs);
+    const total = p.total > 0 ? p.total : (item.costPrice || 0) * (item.quantity || 0);
+    const unit = p.avgUnitCost > 0 ? p.avgUnitCost : item.costPrice || 0;
+    return { total, unit, hasPurchases: p.total > 0, count: p.count };
   };
 
   const filteredItems = items.filter((item) => {
@@ -340,12 +420,13 @@ export const CashierInventoryPage: React.FC = () => {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-right border-collapse text-xs">
+            <table className="w-full text-right border-collapse text-xs min-w-[860px]">
               <thead>
                 <tr className="border-b border-gray-100 text-gray-400 font-semibold">
                   <th className="pb-3 px-3">اسم المادة الخام</th>
                   <th className="pb-3 px-3">الرصيد المتاح</th>
-                  <th className="pb-3 px-3">سعر التكلفة</th>
+                  <th className="pb-3 px-3">متوسط سعر الوحدة</th>
+                  <th className="pb-3 px-3">التكلفة الإجمالية</th>
                   <th className="pb-3 px-3">حد الأمان الأدنى</th>
                   <th className="pb-3 px-3">آخر توريد</th>
                   <th className="pb-3 px-3">الحالة التشغيلية</th>
@@ -356,6 +437,7 @@ export const CashierInventoryPage: React.FC = () => {
                 {filteredItems.map((item) => {
                   const isOut = item.quantity <= 0;
                   const isLow = !isOut && item.quantity <= item.minLimit;
+                  const costInfo = costSummaryFor(item);
 
                   return (
                     <tr key={item._id} className="hover:bg-[#faf8f5]/80 transition">
@@ -377,15 +459,20 @@ export const CashierInventoryPage: React.FC = () => {
                         </span>
                       </td>
 
-                      <td className="py-3 px-3 font-mono text-xs text-gray-600">
-                        {item.costPrice ? `${formatPrice(item.costPrice)} / ${item.unit}` : '—'}
+                      <td className="py-3 px-3 font-mono text-xs text-gray-700 whitespace-nowrap">
+                        {costInfo.unit > 0 ? formatPrice(costInfo.unit) : '—'}
+                        {costInfo.unit > 0 ? <span className="text-gray-400 text-[10px]"> / {item.unit}</span> : null}
                       </td>
 
-                      <td className="py-3 px-3 font-mono text-xs text-gray-500">
+                      <td className="py-3 px-3 font-mono text-xs text-[#2e5b9f] font-bold whitespace-nowrap">
+                        {costInfo.total > 0 ? formatPrice(costInfo.total) : '—'}
+                      </td>
+
+                      <td className="py-3 px-3 font-mono text-sm font-bold text-gray-700 whitespace-nowrap">
                         {formatNumber(item.minLimit)} {item.unit}
                       </td>
 
-                      <td className="py-3 px-3 font-mono text-xs text-gray-500">
+                      <td className="py-3 px-3 font-mono text-xs text-gray-500 whitespace-nowrap">
                         {formatDate(item.lastRestocked) || '—'}
                       </td>
 
@@ -486,6 +573,29 @@ export const CashierInventoryPage: React.FC = () => {
             required
           />
 
+          <Input
+            label="التكلفة الإجمالية (جنيها) *"
+            type="number"
+            min="0"
+            step="any"
+            placeholder="مثال: 1500"
+            value={formData.totalCost}
+            onChange={(e) => {
+              setFormData({ ...formData, totalCost: e.target.value });
+              if (formErrors.totalCost) setFormErrors({ ...formErrors, totalCost: undefined });
+            }}
+            error={formErrors.totalCost}
+            required
+          />
+          <p className="text-[10px] text-gray-400 -mt-2">
+            سعر تكلفة الوحدة بيتحسب تلقائياً: الإجمالي ÷ الكمية
+            {Number(formData.quantity) > 0 && Number(formData.totalCost) > 0 && (
+              <span className="font-mono font-bold text-[#2e5b9f]">
+                {' '}= {(Number(formData.totalCost) / Number(formData.quantity)).toFixed(2)} / {formData.unit}
+              </span>
+            )}
+          </p>
+
           <div className="pt-3 flex items-center justify-end gap-2 border-t border-gray-100">
             <Button type="button" variant="outline" onClick={() => setIsAddModalOpen(false)}>
               إلغاء
@@ -523,14 +633,7 @@ export const CashierInventoryPage: React.FC = () => {
               placeholder="10"
               value={purchaseFormData.quantity}
               onChange={(e) => {
-                const q = e.target.value;
-                const cost = parseFloat(purchaseFormData.unitCost) || 0;
-                const qtyNum = parseFloat(q) || 0;
-                setPurchaseFormData({
-                  ...purchaseFormData,
-                  quantity: q,
-                  totalAmount: cost > 0 && qtyNum > 0 ? String((cost * qtyNum).toFixed(0)) : purchaseFormData.totalAmount,
-                });
+                setPurchaseFormData({ ...purchaseFormData, quantity: e.target.value });
                 if (purchaseErrors.quantity) setPurchaseErrors({ ...purchaseErrors, quantity: undefined });
               }}
               error={purchaseErrors.quantity}
@@ -538,38 +641,29 @@ export const CashierInventoryPage: React.FC = () => {
             />
 
             <Input
-              label="سعر تكلفة الوحدة ()"
+              label="المبلغ الإجمالي لفاتورة الشراء (جنيها) *"
               type="number"
-              min="0.1"
+              min="1"
               step="any"
-              placeholder="150"
-              value={purchaseFormData.unitCost}
+              placeholder="الإجمالي"
+              value={purchaseFormData.totalAmount}
               onChange={(e) => {
-                const uCost = e.target.value;
-                const costNum = parseFloat(uCost) || 0;
-                const qtyNum = parseFloat(purchaseFormData.quantity) || 0;
-                setPurchaseFormData({
-                  ...purchaseFormData,
-                  unitCost: uCost,
-                  totalAmount: costNum > 0 && qtyNum > 0 ? String((costNum * qtyNum).toFixed(0)) : purchaseFormData.totalAmount,
-                });
+                setPurchaseFormData({ ...purchaseFormData, totalAmount: e.target.value });
+                if (purchaseErrors.totalAmount) setPurchaseErrors({ ...purchaseErrors, totalAmount: undefined });
               }}
+              error={purchaseErrors.totalAmount}
+              required
             />
           </div>
 
-          <Input
-            label="المبلغ الإجمالي لفاتورة الشراء () *"
-            type="number"
-            min="1"
-            placeholder="الإجمالي"
-            value={purchaseFormData.totalAmount}
-            onChange={(e) => {
-              setPurchaseFormData({ ...purchaseFormData, totalAmount: e.target.value });
-              if (purchaseErrors.totalAmount) setPurchaseErrors({ ...purchaseErrors, totalAmount: undefined });
-            }}
-            error={purchaseErrors.totalAmount}
-            required
-          />
+          <p className="text-[10px] text-gray-400 -mt-2">
+            سعر تكلفة الوحدة بيتحسب تلقائياً: الإجمالي ÷ الكمية
+            {Number(purchaseFormData.quantity) > 0 && Number(purchaseFormData.totalAmount) > 0 && (
+              <span className="font-mono font-bold text-[#2e5b9f]">
+                {' '}= {(Number(purchaseFormData.totalAmount) / Number(purchaseFormData.quantity)).toFixed(2)} / {selectedItem?.unit}
+              </span>
+            )}
+          </p>
 
           <div className="grid grid-cols-2 gap-3">
             <Input

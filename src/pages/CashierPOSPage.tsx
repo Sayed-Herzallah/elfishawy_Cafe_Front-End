@@ -947,6 +947,7 @@ export const CashierPOSPage: React.FC = () => {
         order={selectedReceiptOrder}
         isOpen={!!selectedReceiptOrder}
         onClose={() => setSelectedReceiptOrder(null)}
+        products={products}
       />
     </div>
   );

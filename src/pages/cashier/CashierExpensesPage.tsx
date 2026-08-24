@@ -166,6 +166,12 @@ export const CashierExpensesPage: React.FC = () => {
         category: 'inventory',
         inventoryItemLinked: formData.inventoryItemLinked || undefined,
         inventoryQuantityAdded: formData.quantity ? Number(formData.quantity) : undefined,
+        // الإجمالي وسعر الوحدة بيتسجلوا على القيد — الباك إند بيرفع سعر تكلفة الصنف تلقائياً
+        totalCost: Number(formData.amount),
+        unitCost:
+          formData.quantity && Number(formData.quantity) > 0
+            ? Number((Number(formData.amount) / Number(formData.quantity)).toFixed(2))
+            : undefined,
         date: formData.date ? new Date(formData.date).toISOString() : new Date().toISOString(),
       });
 

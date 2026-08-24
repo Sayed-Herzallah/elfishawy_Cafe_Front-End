@@ -169,19 +169,6 @@ export const AdminReportsPage: React.FC = () => {
     title: 'فلترة متقدمة للتقرير المالي',
     fields: [
       { name: 'date', label: 'فترة مخصصة (من - إلى)', type: 'date', isDateRange: true },
-      {
-        name: 'category',
-        label: 'فئة المصروف',
-        type: 'select',
-        options: [
-          { value: 'all', label: 'كل الفئات' },
-          { value: 'inventory', label: 'مشتريات المخزون' },
-          { value: 'utilities', label: 'المرافق' },
-          { value: 'salaries', label: 'الرواتب' },
-          { value: 'rent', label: 'الإيجار' },
-          { value: 'other', label: 'أخرى' },
-        ],
-      },
     ],
     activeFiltersCount,
   };
@@ -343,18 +330,6 @@ export const AdminReportsPage: React.FC = () => {
             showPresets={true}
             className="min-w-[220px]"
           />
-          <select
-            value={categoryFilter}
-            onChange={(e) => setCategoryFilter(e.target.value)}
-            className="bg-white border border-gray-200 rounded-xl px-3 py-2 text-xs text-gray-900 focus:outline-none focus:ring-2 focus:ring-[#2e5b9f]/20 focus:border-[#2e5b9f] cursor-pointer"
-          >
-            <option value="all">كل الفئات</option>
-            <option value="inventory">مشتريات المخزون</option>
-            <option value="utilities">المرافق</option>
-            <option value="salaries">الرواتب</option>
-            <option value="rent">الإيجار</option>
-            <option value="other">أخرى</option>
-          </select>
           {activeFiltersCount > 0 && (
             <button
               onClick={handleFilterReset}

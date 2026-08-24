@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { inventoryService } from '../../services/opsService';
+import { inventoryService, expenseService } from '../../services/opsService';
 import { productService, recipeService } from '../../services/catalogService';
 import { syncProductStockAfterRestock } from '../../utils/stockSync';
-import { InventoryItem } from '../../types';
+import { InventoryItem, Expense } from '../../types';
 import { useNotification } from '../../contexts/NotificationContext';
-import { formatPrice, formatNumber, formatDate } from '../../utils/formatters';
+import { useAuth } from '../../contexts/AuthContext';
+import { formatPrice, formatNumber, formatDate, formatDateTime } from '../../utils/formatters';
+import { mergeRestockHistory, addRestockJournalEntry, purchaseSummary } from '../../utils/restockJournal';
 import { StatCard } from '../../components/ui/StatCard';
 import { ComparisonStatCard } from '../../components/ui/ComparisonStatCard';
 import { DateRangeFilter, DateRange, toLocalDateString } from '../../components/ui/DateRangeFilter';
@@ -48,8 +50,9 @@ export const AdminInventoryPage: React.FC = () => {
   const [dateFrom, setDateFrom] = useState<string>('');
   const [dateTo, setDateTo] = useState<string>('');
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
-  const [formErrors, setFormErrors] = useState<{ name?: string; quantity?: string; minLimit?: string }>({});
-  const [restockErrors, setRestockErrors] = useState<{ quantity?: string }>({});
+  const [formErrors, setFormErrors] = useState<{ name?: string; quantity?: string; minLimit?: string; totalCost?: string }>({});
+  const [restockErrors, setRestockErrors] = useState<{ quantity?: string; totalCost?: string }>({});
+  const [restockTotalCost, setRestockTotalCost] = useState('');
   const [isFormSubmitted, setIsFormSubmitted] = useState(false);
   const [isRestockSubmitted, setIsRestockSubmitted] = useState(false);
 
@@ -58,6 +61,7 @@ export const AdminInventoryPage: React.FC = () => {
     quantity: '10',
     unit: 'KG',
     minLimit: '5',
+    totalCost: '',
   });
 
   // Edit item states
@@ -67,14 +71,46 @@ export const AdminInventoryPage: React.FC = () => {
     name: '',
     unit: 'KG',
     minLimit: '5',
+    totalCost: '',
   });
-  const [editFormErrors, setEditFormErrors] = useState<{ name?: string; minLimit?: string }>({});
+  const [editFormErrors, setEditFormErrors] = useState<{ name?: string; minLimit?: string; totalCost?: string }>({});
   const [isEditFormSubmitted, setIsEditFormSubmitted] = useState(false);
 
   // View Detail State
   const [viewingItem, setViewingItem] = useState<InventoryItem | null>(null);
+  // 🧾 قيود الشراء والتوريد المرتبطة بالأصناف — لعرضها في تفاصيل الصنف مع "بواسطة مين"
+  const [purchaseLogs, setPurchaseLogs] = useState<Expense[]>([]);
+
+  /** اسم اللي قام بآخر توريد للصنف — من بيانات الصنف أولاً ثم من آخر توريد معروف (سيرفر أو اليومية المحلية) */
+  const resolveRestockerName = (item: InventoryItem): string => {
+    const rb = item.lastRestockedBy;
+    const fromItem =
+      rb && typeof rb === 'object' ? rb.userName : typeof rb === 'string' ? rb : '';
+    if (fromItem) return fromItem;
+
+    const latest = mergeRestockHistory(item._id, purchaseLogs)[0];
+    if (!latest) return '';
+
+    // لو آخر توريد للصنف أحدث من آخر توريد معروف — حصل من جهاز تاني ومن غير سجل ومش هنعرف مين
+    const restockedTime = new Date(item.lastRestocked || '').getTime();
+    if (!isNaN(restockedTime) && restockedTime - latest.dateMs > 60 * 1000) return '';
+
+    return latest.by || '';
+  };
+
+  /** 💰 التكلفة الصحيحة للصنف من فواتير الشراء الفعلية:
+   * الإجمالي المستثمر = Σ مبالغ فواتير الشراء المرتبطة بالصنف
+   * (مثلاً شريت حبوب مرتين ٢٠٠٠ + ٣٣٠٠ = ٥٣٠٠ — بدل ما بيظهر ٤٠٠٠ من سعر آخر توريد).
+   * متوسط سعر الوحدة = الإجمالي ÷ إجمالي الكمية المشتراة */
+  const costSummaryFor = (item: InventoryItem) => {
+    const p = purchaseSummary(item._id, purchaseLogs);
+    const total = p.total > 0 ? p.total : (item.costPrice || 0) * (item.quantity || 0);
+    const unit = p.avgUnitCost > 0 ? p.avgUnitCost : item.costPrice || 0;
+    return { total, unit, hasPurchases: p.total > 0, count: p.count, qty: p.qty };
+  };
 
   const { showToast, showError } = useNotification();
+  const { user } = useAuth();
 
   const loadInventory = async () => {
     try {
@@ -82,6 +118,15 @@ export const AdminInventoryPage: React.FC = () => {
       const res = await inventoryService.listInventory();
       if (res.success && res.data) {
         setItems(res.data);
+      }
+      // سجل المشتريات المرتبط بالأصناف (أفضل جهد)
+      try {
+        const expRes = await expenseService.listExpenses();
+        if (expRes.success && expRes.data) {
+          setPurchaseLogs(expRes.data.filter((e) => e.category === 'inventory'));
+        }
+      } catch {
+        /* تجاهل — السجل إضافة تحسينية */
       }
     } catch (err) {
       showError(err);
@@ -104,7 +149,7 @@ export const AdminInventoryPage: React.FC = () => {
   const handleCreateItem = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsFormSubmitted(true);
-    const errors: { name?: string; quantity?: string; minLimit?: string } = {};
+    const errors: { name?: string; quantity?: string; minLimit?: string; totalCost?: string } = {};
 
     if (!formData.name.trim()) {
       errors.name = 'اسم الصنف مطلوب';
@@ -114,6 +159,10 @@ export const AdminInventoryPage: React.FC = () => {
     }
     if (formData.minLimit === '' || Number(formData.minLimit) < 1) {
       errors.minLimit = 'الرجاء تحديد حد أدنى صحيح (1 أو أكثر)';
+    }
+    // ✅ التكلفة الإجمالية إجبارية
+    if (formData.totalCost === '' || Number(formData.totalCost) <= 0) {
+      errors.totalCost = 'التكلفة الإجمالية مطلوبة ويجب أن تكون أكبر من صفر';
     }
 
     if (Object.keys(errors).length > 0) {
@@ -126,11 +175,15 @@ export const AdminInventoryPage: React.FC = () => {
 
     try {
       setIsSubmitting(true);
+      const qtyNum = Number(formData.quantity) || 0;
+      const totalNum = Number(formData.totalCost);
       const res = await inventoryService.createItem({
         name: formData.name.trim(),
-        quantity: Number(formData.quantity) || 0,
+        quantity: qtyNum,
         unit: formData.unit,
         minLimit: Number(formData.minLimit) || 5,
+        // ✅ الإجمالي بيتبعت للباك إند وهو بيحسب سعر تكلفة الوحدة (الإجمالي ÷ الكمية) ويسجل رصيد افتتاحي في المشتريات
+        totalCost: totalNum,
       });
 
       if (res.success) {
@@ -138,7 +191,7 @@ export const AdminInventoryPage: React.FC = () => {
         setIsAddModalOpen(false);
         setIsFormSubmitted(false);
         setFormErrors({});
-        setFormData({ name: '', quantity: '10', unit: 'KG', minLimit: '5' });
+        setFormData({ name: '', quantity: '10', unit: 'KG', minLimit: '5', totalCost: '' });
         loadInventory();
       }
     } catch (err) {
@@ -151,15 +204,19 @@ export const AdminInventoryPage: React.FC = () => {
   const handleRestock = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsRestockSubmitted(true);
-    const errors: { quantity?: string } = {};
+    const errors: { quantity?: string; totalCost?: string } = {};
 
     if (!restockQty || Number(restockQty) <= 0) {
       errors.quantity = 'الرجاء إدخال كمية توريد صحيحة أكبر من صفر';
     }
+    // ✅ التكلفة الإجمالية للكمية المضافة إجبارية
+    if (!restockTotalCost || Number(restockTotalCost) <= 0) {
+      errors.totalCost = 'التكلفة الإجمالية مطلوبة ويجب أن تكون أكبر من صفر';
+    }
 
     if (Object.keys(errors).length > 0) {
       setRestockErrors(errors);
-      showToast('الرجاء تصحيح الحقل المميز باللون الأحمر', 'error');
+      showToast('الرجاء تصحيح الحقول المميزة باللون الأحمر', 'error');
       return;
     }
 
@@ -167,13 +224,37 @@ export const AdminInventoryPage: React.FC = () => {
 
     try {
       setIsSubmitting(true);
-      const res = await inventoryService.restockItem(selectedItem!._id, Number(restockQty));
+      // ✅ التوريد بيسجل الكمية + سعر تكلفة وحدة **متوسط مرجّح**:
+      // (الكمية القديمة × سعرها القديم + قيمة فاتورة التوريد الجديدة) ÷ إجمالي الكمية
+      // عشان الإجمالي بالمخزون يفضل صح مهما اشتريت نفس الصنف كام مرة.
+      const qtyNum = Number(restockQty);
+      const oldQty = Number(selectedItem?.quantity) || 0;
+      const oldCost = Number(selectedItem?.costPrice) || 0;
+      const newTotal = Number(restockTotalCost);
+      const unitCost = Number((newTotal / qtyNum).toFixed(2));
+      const weightedCost =
+        oldQty > 0 && oldCost > 0
+          ? Number(((oldQty * oldCost + newTotal) / (oldQty + qtyNum)).toFixed(2))
+          : unitCost;
+      const res = await inventoryService.restockItem(selectedItem!._id, qtyNum, weightedCost);
       if (res.success) {
-        showToast(`تم توريد ${restockQty} ${selectedItem!.unit} لـ ${selectedItem!.name}`);
+        // 📓 تسجيل التوريد في اليومية المحلية باسم المستخدم — السيرفر مبيسجلش توريد المدير باسمه
+        addRestockJournalEntry({
+          itemId: selectedItem!._id,
+          date: new Date().toISOString(),
+          qty: qtyNum,
+          totalCost: Number(restockTotalCost),
+          unitCost,
+          by: user?.userName || 'المدير',
+          byRole: 'admin',
+          source: 'admin-restock',
+        });
+        showToast(`تم توريد ${restockQty} ${selectedItem!.unit} لـ ${selectedItem!.name} بتكلفة إجمالية ${Number(restockTotalCost).toLocaleString('en-US')} جنيها`);
         setIsRestockModalOpen(false);
         setIsRestockSubmitted(false);
         setRestockErrors({});
         setRestockQty('');
+        setRestockTotalCost('');
 
         // ✅ Auto-sync product stockQuantity for all products linked to this inventory item
         const updatedCount = await syncProductStockAfterRestock(selectedItem!._id);
@@ -194,13 +275,21 @@ export const AdminInventoryPage: React.FC = () => {
   const handleUpdateItem = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsEditFormSubmitted(true);
-    const errors: { name?: string; minLimit?: string } = {};
+    const errors: { name?: string; minLimit?: string; totalCost?: string } = {};
 
     if (!editFormData.name.trim()) {
       errors.name = 'اسم الصنف مطلوب';
     }
     if (editFormData.minLimit === '' || Number(editFormData.minLimit) < 1) {
       errors.minLimit = 'الرجاء تحديد حد أدنى صحيح (1 أو أكثر)';
+    }
+    // ✅ التكلفة الإجمالية اختيارية — لو اتكتبت لازم تكون أكبر من صفر والكمية الحالية تكفي للحساب
+    if (editFormData.totalCost !== '') {
+      if (Number(editFormData.totalCost) <= 0) {
+        errors.totalCost = 'التكلفة الإجمالية يجب أن تكون أكبر من صفر';
+      } else if ((editingItem?.quantity || 0) <= 0) {
+        errors.totalCost = 'الكمية الحالية صفر — ورد كمية أولاً عشان نقدر نحسب التكلفة';
+      }
     }
 
     if (Object.keys(errors).length > 0) {
@@ -213,14 +302,27 @@ export const AdminInventoryPage: React.FC = () => {
 
     try {
       setIsSubmitting(true);
+      // ✅ تعديل التكلفة الإجمالية من الفرونت — الـ API بيخزن تكلفة الوحدة (الإجمالي ÷ الكمية الحالية)
+      const totalNum = Number(editFormData.totalCost);
+      const qtyNum = editingItem!.quantity || 0;
+      const updatedCostPrice =
+        editFormData.totalCost !== '' && totalNum > 0 && qtyNum > 0
+          ? Number((totalNum / qtyNum).toFixed(2))
+          : undefined;
+
       const res = await inventoryService.updateItem(editingItem!._id, {
         name: editFormData.name.trim(),
         unit: editFormData.unit,
         minLimit: Number(editFormData.minLimit),
+        ...(updatedCostPrice !== undefined ? { costPrice: updatedCostPrice } : {}),
       });
 
       if (res.success) {
-        showToast('تم تحديث صنف المخزون بنجاح');
+        showToast(
+          updatedCostPrice !== undefined
+            ? `تم تحديث الصنف والتكلفة الإجمالية (${Number(editFormData.totalCost).toLocaleString('en-US')} جنيها) بنجاح`
+            : 'تم تحديث صنف المخزون بنجاح'
+        );
         setIsEditModalOpen(false);
         setIsEditFormSubmitted(false);
         setEditFormErrors({});
@@ -276,7 +378,7 @@ export const AdminInventoryPage: React.FC = () => {
   // 📊 كل الإحصائيات بتتحسب من النتائج المعروضة بعد الفلترة — مش من كل الأصناف
   const shownLowCount = filteredItems.filter((i) => i.quantity > 0 && i.quantity <= i.minLimit).length;
   const shownOutCount = filteredItems.filter((i) => i.quantity <= 0).length;
-  const shownValue = filteredItems.reduce((sum, i) => sum + (i.costPrice || 0) * i.quantity, 0);
+  const shownValue = filteredItems.reduce((sum, i) => sum + (costSummaryFor(i).total || 0), 0);
   const shownAvailableCount = Math.max(0, filteredItems.length - shownLowCount - shownOutCount);
   const availablePct = filteredItems.length > 0 ? Math.round((shownAvailableCount / filteredItems.length) * 100) : 0;
   const lowPct = filteredItems.length > 0 ? Math.round((shownLowCount / filteredItems.length) * 100) : 0;
@@ -412,12 +514,8 @@ export const AdminInventoryPage: React.FC = () => {
                 {filteredItems.map((item) => {
                   const isLow = item.quantity > 0 && item.quantity <= item.minLimit;
                   const isOut = item.quantity <= 0;
-                  const restockerName =
-                    item.lastRestockedBy && typeof item.lastRestockedBy === 'object'
-                      ? item.lastRestockedBy.userName
-                      : typeof item.lastRestockedBy === 'string'
-                      ? item.lastRestockedBy
-                      : null;
+                  const restockerName = resolveRestockerName(item) || null;
+                  const costInfo = costSummaryFor(item);
 
 return (
                      <div
@@ -451,14 +549,21 @@ return (
                           </span>
                         </div>
                         <div className="text-left">
-                          <span className="text-[10px] text-gray-400 block mb-0.5">سعر التكلفة</span>
-                          <span className="font-bold text-[#2e5b9f] font-mono">
-                            {item.costPrice ? `${formatPrice(item.costPrice)} / ${item.unit}` : '—'}
+                          <span className="text-[10px] text-gray-400 block mb-0.5">متوسط سعر الوحدة</span>
+                          <span className="font-bold text-gray-900 font-mono">
+                            {costInfo.unit > 0 ? formatPrice(costInfo.unit) : '—'}
+                            {costInfo.unit > 0 ? <span className="text-gray-400 text-[10px]"> / {item.unit}</span> : null}
                           </span>
                         </div>
-                        <div className="sm:col-span-2">
+                        <div className="text-left">
+                          <span className="text-[10px] text-gray-400 block mb-0.5">التكلفة الإجمالية</span>
+                          <span className={`font-bold font-mono ${costInfo.total > 0 ? 'text-[#2e5b9f]' : 'text-gray-300'}`}>
+                            {costInfo.total > 0 ? formatPrice(costInfo.total) : '—'}
+                          </span>
+                        </div>
+                        <div>
                           <span className="text-[10px] text-gray-400 block mb-0.5">حد الأمان</span>
-                          <span className="font-bold text-gray-500 font-mono">
+                          <span className="font-bold text-gray-700 font-mono text-sm">
                             {formatNumber(item.minLimit)} {item.unit}
                           </span>
                         </div>
@@ -479,12 +584,13 @@ return (
 <button
                            onClick={(e) => {
                              e.stopPropagation();
-                             setEditingItem(item);
-                             setEditFormData({
-                               name: item.name,
-                               unit: item.unit,
-                               minLimit: String(item.minLimit),
-                             });
+                              setEditingItem(item);
+                              setEditFormData({
+                                name: item.name,
+                                unit: item.unit,
+                                minLimit: String(item.minLimit),
+                                totalCost: item.costPrice ? String(Number((item.costPrice * item.quantity).toFixed(2))) : '',
+                              });
                              setEditFormErrors({});
                              setIsEditFormSubmitted(false);
                              setIsEditModalOpen(true);
@@ -500,6 +606,7 @@ return (
                             e.stopPropagation();
                             setSelectedItem(item);
                             setRestockQty('10');
+                            setRestockTotalCost(item.costPrice ? String((item.costPrice * 10).toFixed(0)) : '');
                             setRestockErrors({});
                             setIsRestockModalOpen(true);
                           }}
@@ -523,12 +630,13 @@ return (
 
               {/* Desktop Table Layout (>= md) */}
               <div className="hidden md:block overflow-x-auto -mx-6 px-6 pb-2">
-                <table className="w-full text-right border-collapse text-xs min-w-[780px]">
+                <table className="w-full text-right border-collapse text-xs min-w-[920px]">
                   <thead>
                     <tr className="border-b border-gray-100 text-gray-400 font-semibold">
                       <th className="pb-3 px-3">اسم المادة / الصنف</th>
                       <th className="pb-3 px-3">الكمية الحالية</th>
-                      <th className="pb-3 px-3">سعر التكلفة</th>
+                      <th className="pb-3 px-3">متوسط سعر الوحدة</th>
+                      <th className="pb-3 px-3">التكلفة الإجمالية</th>
                       <th className="pb-3 px-3">حد الأمان</th>
                       <th className="pb-3 px-3">آخر توريد</th>
                       <th className="pb-3 px-3">الحالة</th>
@@ -539,12 +647,8 @@ return (
                     {filteredItems.map((item) => {
                       const isLow = item.quantity > 0 && item.quantity <= item.minLimit;
                       const isOut = item.quantity <= 0;
-                      const restockerName =
-                        item.lastRestockedBy && typeof item.lastRestockedBy === 'object'
-                          ? item.lastRestockedBy.userName
-                          : typeof item.lastRestockedBy === 'string'
-                          ? item.lastRestockedBy
-                          : null;
+                      const restockerName = resolveRestockerName(item) || null;
+                      const costInfo = costSummaryFor(item);
 
                       return (
                         <tr
@@ -555,27 +659,32 @@ return (
                           <td className="py-3.5 px-3">
                             <span className="font-bold text-gray-900 block">{item.name}</span>
                             {item.lastRestocked && (
-                              <span className="text-[10px] text-gray-400 font-mono">
+                              <span className="text-[10px] text-gray-400 font-mono whitespace-nowrap">
                                 {formatDate(item.lastRestocked)}
                                 {restockerName ? ` • ${restockerName}` : ''}
                               </span>
                             )}
                           </td>
 
-                          <td className="py-3.5 px-3 font-mono font-bold text-sm text-gray-900">
+                          <td className="py-3.5 px-3 font-mono font-bold text-sm text-gray-900 whitespace-nowrap">
                             {formatNumber(item.quantity)} {item.unit}
                           </td>
 
-                          <td className="py-3.5 px-3 font-mono text-[#2e5b9f] font-bold">
-                            {item.costPrice ? `${formatPrice(item.costPrice)} / ${item.unit}` : '—'}
+                          <td className="py-3.5 px-3 font-mono text-xs text-gray-700 whitespace-nowrap">
+                            {costInfo.unit > 0 ? formatPrice(costInfo.unit) : '—'}
+                            {costInfo.unit > 0 ? <span className="text-gray-400 text-[10px]"> / {item.unit}</span> : null}
                           </td>
 
-                          <td className="py-3.5 px-3 font-mono text-gray-500">
+                          <td className="py-3.5 px-3 font-mono text-[#2e5b9f] font-bold text-sm whitespace-nowrap">
+                            {costInfo.total > 0 ? formatPrice(costInfo.total) : '—'}
+                          </td>
+
+                          <td className="py-3.5 px-3 font-mono text-sm font-bold text-gray-700 whitespace-nowrap">
                             {formatNumber(item.minLimit)} {item.unit}
                           </td>
 
-                          <td className="py-3.5 px-3 font-mono text-gray-500 text-[11px]">
-                            {formatDate(item.lastRestocked)}
+                          <td className="py-3.5 px-3 font-mono text-gray-500 text-[11px] whitespace-nowrap">
+                            {formatDate(item.lastRestocked) || '—'}
                           </td>
 
                           <td className="py-3.5 px-3">
@@ -605,6 +714,7 @@ return (
                                     name: item.name,
                                     unit: item.unit,
                                     minLimit: String(item.minLimit),
+                                    totalCost: item.costPrice ? String(Number((item.costPrice * item.quantity).toFixed(2))) : '',
                                   });
                                   setEditFormErrors({});
                                   setIsEditFormSubmitted(false);
@@ -621,6 +731,7 @@ return (
                                   e.stopPropagation();
                                   setSelectedItem(item);
                                   setRestockQty('10');
+                                  setRestockTotalCost(item.costPrice ? String((item.costPrice * 10).toFixed(0)) : '');
                                   setRestockErrors({});
                                   setIsRestockModalOpen(true);
                                 }}
@@ -689,7 +800,7 @@ return (
           setIsAddModalOpen(false);
           setIsFormSubmitted(false);
           setFormErrors({});
-          setFormData({ name: '', quantity: '10', unit: 'KG', minLimit: '5' });
+          setFormData({ name: '', quantity: '10', unit: 'KG', minLimit: '5', totalCost: '' });
         }}
         title="إضافة صنف مخزون جديد"
         maxWidth="md"
@@ -752,6 +863,23 @@ return (
             required
           />
 
+          <Input
+            label="التكلفة الإجمالية (جنيها) *"
+            type="number"
+            min="0"
+            step="any"
+            placeholder="مثال: 1500"
+            value={formData.totalCost}
+            onChange={(e) => {
+              setFormData({ ...formData, totalCost: e.target.value });
+              if (formErrors.totalCost) setFormErrors({ ...formErrors, totalCost: undefined });
+            }}
+            error={formErrors.totalCost}
+            isSubmitted={isFormSubmitted}
+            helperText="إجمالي ما دفعت للكمية كلها — سعر تكلفة الوحدة بيتحسب تلقائياً (الإجمالي ÷ الكمية)."
+            required
+          />
+
           <div className="pt-4 flex items-center justify-end gap-2 border-t border-gray-100">
             <Button
               type="button"
@@ -760,7 +888,7 @@ return (
                 setIsAddModalOpen(false);
                 setIsFormSubmitted(false);
                 setFormErrors({});
-                setFormData({ name: '', quantity: '10', unit: 'KG', minLimit: '5' });
+                setFormData({ name: '', quantity: '10', unit: 'KG', minLimit: '5', totalCost: '' });
               }}
             >
               إلغاء
@@ -785,6 +913,7 @@ return (
           setIsRestockSubmitted(false);
           setRestockErrors({});
           setRestockQty('');
+          setRestockTotalCost('');
         }}
         title={`توريد كمية إضافية: ${selectedItem?.name || ''}`}
         maxWidth="sm"
@@ -813,6 +942,30 @@ return (
             required
           />
 
+          <Input
+            label={`التكلفة الإجمالية للكمية المضافة (جنيها) *`}
+            type="number"
+            min="0"
+            step="any"
+            placeholder="مثال: 1500"
+            value={restockTotalCost}
+            onChange={(e) => {
+              setRestockTotalCost(e.target.value);
+              if (restockErrors.totalCost) setRestockErrors({ ...restockErrors, totalCost: undefined });
+            }}
+            error={restockErrors.totalCost}
+            isSubmitted={isRestockSubmitted}
+            required
+          />
+          <p className="text-[10px] text-gray-400 -mt-2">
+            سعر تكلفة الوحدة بيتحسب تلقائياً: الإجمالي ÷ الكمية
+            {Number(restockQty) > 0 && Number(restockTotalCost) > 0 && (
+              <span className="font-mono font-bold text-[#2e5b9f]">
+                {' '}= {(Number(restockTotalCost) / Number(restockQty)).toFixed(2)} / {selectedItem?.unit}
+              </span>
+            )}
+          </p>
+
           <div className="pt-4 flex items-center justify-end gap-2 border-t border-gray-100">
             <Button
               type="button"
@@ -822,6 +975,7 @@ return (
                 setIsRestockSubmitted(false);
                 setRestockErrors({});
                 setRestockQty('');
+                setRestockTotalCost('');
               }}
             >
               إلغاء
@@ -887,18 +1041,100 @@ return (
               </div>
               <div className="p-3 bg-white rounded-xl border border-gray-200">
                 <span className="text-[10px] text-gray-400 font-bold block">آخر توريد</span>
-                <span className="text-sm font-bold font-mono text-gray-900">{viewingItem.lastRestocked ? formatDate(viewingItem.lastRestocked) : '—'}</span>
+                <span className="text-xs font-bold font-mono text-gray-900 whitespace-nowrap">{viewingItem.lastRestocked ? formatDateTime(viewingItem.lastRestocked) : '—'}</span>
               </div>
-              <div className="p-3 bg-white rounded-xl border border-gray-200 col-span-2">
+              <div className="p-3 bg-white rounded-xl border border-gray-200">
                 <span className="text-[10px] text-gray-400 font-bold block">تم التوريد بواسطة</span>
                 <span className="text-sm font-bold text-gray-900">
-                  {viewingItem.lastRestockedBy && typeof viewingItem.lastRestockedBy === 'object'
-                    ? viewingItem.lastRestockedBy.userName
-                    : typeof viewingItem.lastRestockedBy === 'string'
-                    ? viewingItem.lastRestockedBy
+                  {resolveRestockerName(viewingItem) || '—'}
+                </span>
+              </div>
+              <div className="p-3 bg-white rounded-xl border border-gray-200">
+                <span className="text-[10px] text-gray-400 font-bold block">متوسط سعر الوحدة</span>
+                <span className="text-lg font-bold font-mono text-gray-900 whitespace-nowrap">
+                  {costSummaryFor(viewingItem).unit > 0 ? formatPrice(costSummaryFor(viewingItem).unit) : '—'}
+                  {costSummaryFor(viewingItem).unit > 0 ? <span className="text-xs text-gray-400 font-sans"> / {viewingItem.unit}</span> : null}
+                </span>
+                {costSummaryFor(viewingItem).hasPurchases && (
+                  <span className="text-[10px] text-emerald-700 font-bold block mt-1">من Σ فواتير الشراء الفعلية</span>
+                )}
+              </div>
+              <div className="p-3 bg-white rounded-xl border border-gray-200">
+                <span className="text-[10px] text-gray-400 font-bold block">التكلفة الإجمالية (المستثمرة)</span>
+                <span className="text-lg font-bold font-mono text-[#2e5b9f] whitespace-nowrap">
+                  {costSummaryFor(viewingItem).total > 0 ? formatPrice(costSummaryFor(viewingItem).total) : '—'}
+                </span>
+                <span className="text-[10px] text-gray-400 block mt-1">إجمالي ما تم دفعه لشراء هذا الصنف</span>
+              </div>
+              <div className="p-3 bg-white rounded-xl border border-gray-200">
+                <span className="text-[10px] text-gray-400 font-bold block">الكمية المشتراة / مرات الشراء</span>
+                <span className="text-sm font-bold font-mono text-gray-900 whitespace-nowrap">
+                  {costSummaryFor(viewingItem).hasPurchases
+                    ? `${formatNumber(costSummaryFor(viewingItem).qty)} ${viewingItem.unit} (${formatNumber(costSummaryFor(viewingItem).count)} مرة)`
                     : '—'}
                 </span>
               </div>
+
+              {/* 📈 تاريخ الأسعار والتوريد — كل توريد بسعره وتاريخه ومين اللي ورّد (سعر قديم ← سعر جديد) */}
+              {(() => {
+                const history = mergeRestockHistory(viewingItem._id, purchaseLogs).slice(0, 8);
+                if (history.length === 0) return null;
+                return (
+                  <div className="col-span-2 space-y-1.5">
+                    <span className="text-[10px] text-gray-400 font-bold block">
+                      📈 تاريخ الأسعار والتوريد ({formatNumber(history.length)} توريد)
+                    </span>
+                    {history.map((entry, idx) => {
+                      const older = history[idx + 1];
+                      const priceChanged =
+                        entry.unitCost !== undefined &&
+                        older?.unitCost !== undefined &&
+                        Math.abs(entry.unitCost - older.unitCost) > 0.009;
+                      return (
+                        <div key={entry.id} className="bg-white border border-gray-200 rounded-lg px-2.5 py-2 space-y-1">
+                          <div className="flex items-center justify-between gap-2 text-xs">
+                            <span className="font-bold text-gray-900 truncate">
+                              ✅ توريد <span className="font-mono text-emerald-700">+{formatNumber(entry.qty)}</span> {viewingItem.unit}
+                              {entry.supplier && <span className="text-gray-500 font-normal"> — مورد: {entry.supplier}</span>}
+                            </span>
+                            <span className="shrink-0 font-mono text-[10px] text-gray-500 whitespace-nowrap">
+                              {formatDateTime(new Date(entry.dateMs))}
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between gap-2 text-[10px]">
+                            <span className="font-mono text-gray-600 whitespace-nowrap">
+                              سعر الوحدة:{' '}
+                              <span className="font-bold text-[#2e5b9f]">{entry.unitCost !== undefined ? formatPrice(entry.unitCost) : '—'}</span>
+                              {priceChanged && (
+                                <span className="font-sans font-bold text-amber-700">
+                                  {' '}(بدلاً من {formatPrice(older!.unitCost!)})
+                                </span>
+                              )}
+                              {entry.totalCost !== undefined && (
+                                <span className="text-gray-400"> • إجمالي {formatPrice(entry.totalCost)}</span>
+                              )}
+                            </span>
+                            <span className="shrink-0 text-gray-500 whitespace-nowrap">
+                              بواسطة <span className="font-bold text-gray-800">{entry.by}</span>
+                              {entry.byRole && (
+                                <span
+                                  className={`mr-1 inline-flex items-center px-1.5 py-px rounded-full font-bold border ${
+                                    entry.byRole === 'admin'
+                                      ? 'bg-blue-50 text-blue-700 border-blue-200'
+                                      : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                  }`}
+                                >
+                                  {entry.byRole === 'admin' ? 'مدير' : 'كاشير'}
+                                </span>
+                              )}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
 
               {/* Timestamps */}
               <div className="col-span-2 flex flex-wrap items-center gap-2 pt-1">
@@ -928,6 +1164,7 @@ return (
                 onClick={() => {
                   setSelectedItem(viewingItem);
                   setRestockQty('10');
+                  setRestockTotalCost(viewingItem.costPrice ? String((viewingItem.costPrice * 10).toFixed(0)) : '');
                   setRestockErrors({});
                   setIsRestockModalOpen(true);
                   setViewingItem(null);
@@ -994,6 +1231,29 @@ return (
             helperText="سيتم إظهار تنبيه فور وصول المخزون لهذه الكمية أو أقل."
             required
           />
+
+          <Input
+            label="التكلفة الإجمالية (جنيها)"
+            type="number"
+            min="0"
+            step="any"
+            placeholder="مثال: 1500"
+            value={editFormData.totalCost}
+            onChange={(e) => {
+              setEditFormData({ ...editFormData, totalCost: e.target.value });
+              if (editFormErrors.totalCost) setEditFormErrors({ ...editFormErrors, totalCost: undefined });
+            }}
+            error={editFormErrors.totalCost}
+            isSubmitted={isEditFormSubmitted}
+          />
+          <p className="text-[10px] text-gray-400 -mt-2">
+            عدّل الإجمالي لو الكمية نفسها بسعر جديد — سعر تكلفة الوحدة بيتحدث تلقائياً: الإجمالي ÷ الكمية الحالية
+            {Number(editFormData.totalCost) > 0 && (editingItem?.quantity || 0) > 0 && (
+              <span className="font-mono font-bold text-[#2e5b9f]">
+                {' '}= {(Number(editFormData.totalCost) / editingItem!.quantity).toFixed(2)} / {editFormData.unit}
+              </span>
+            )}
+          </p>
 
           <div className="pt-4 flex items-center justify-end gap-2 border-t border-gray-100">
             <Button

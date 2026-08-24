@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { orderService } from '../../services/opsService';
-import { Order, OrderStatus } from '../../types';
+import { productService } from '../../services/catalogService';
+import { Order, OrderStatus, Product } from '../../types';
 import { useNotification } from '../../contexts/NotificationContext';
 import { ReceiptModal } from '../../components/ui/ReceiptModal';
 import { ExportModal } from '../../components/ui/ExportModal';
@@ -25,6 +26,7 @@ import {
 
 export const CashierOrdersTrackerPage: React.FC = () => {
   const [orders, setOrders] = useState<Order[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'completed'>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [searchMode, setSearchMode] = useState<'all' | 'orderNumber' | 'table' | 'product'>('all');
@@ -60,6 +62,10 @@ export const CashierOrdersTrackerPage: React.FC = () => {
 
   useEffect(() => {
     loadOrders();
+    // ✅ المنتجات لحل أسماء الأصناف في الفواتير (لو الـ API رجّع product كـ ID)
+    productService.listProducts()
+      .then((res) => { if (res.success && res.data) setProducts(res.data); })
+      .catch(() => { /* الأسماء هتفضل من قاعدة البيانات نفسها */ });
     const interval = setInterval(loadOrders, 12000);
     return () => clearInterval(interval);
   }, []);
@@ -595,6 +601,7 @@ export const CashierOrdersTrackerPage: React.FC = () => {
         order={selectedReceiptOrder}
         isOpen={!!selectedReceiptOrder}
         onClose={() => setSelectedReceiptOrder(null)}
+        products={products}
       />
 
       {/* Export Modal */}

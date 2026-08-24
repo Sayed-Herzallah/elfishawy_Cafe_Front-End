@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Calendar,
   X,
@@ -173,6 +174,7 @@ export const DateRangeFilter: React.FC<DateRangeFilterProps> = ({
   const [isOpen, setIsOpen] = useState(false);
   const [panelStyle, setPanelStyle] = useState<React.CSSProperties>({});
   const rootRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
 
   const currentPreset = useMemo(() => getCurrentPreset(value), [value]);
 
@@ -180,9 +182,11 @@ export const DateRangeFilter: React.FC<DateRangeFilterProps> = ({
   useEffect(() => {
     if (!isOpen) return;
     const handlePointerDown = (e: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
-        setIsOpen(false);
-      }
+      const target = e.target as Node;
+      // الضغط على الزر أو جوه النافذة (اللي بتترندز Portal في الـ body) ميقفلهاش
+      if (rootRef.current?.contains(target)) return;
+      if (panelRef.current?.contains(target)) return;
+      setIsOpen(false);
     };
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setIsOpen(false);
@@ -195,47 +199,20 @@ export const DateRangeFilter: React.FC<DateRangeFilterProps> = ({
     };
   }, [isOpen]);
 
-  // ✅ النافذة مثبتة على مستوى الشاشة (fixed) فلا تتقص جوه أي حاوية overflow
-  // الارتفاع دايماً محسوب ضمن مساحة الشاشة المتاحة (maxHeight ديناميكي) —
-  // فمفيش أي جزء بيقص تحت أو فوق ومن غير سكرول للصفحة، والتقويم نفسه بيسكرول داخلياً لو الشاشة قصيرة
+  // ✅ النافذة بتترندز Portal على مستوى الـ document وبتظهر وسط الشاشة بالظبط —
+  // في كل الصفحات وحتى جوه المودالات، ومش بتتأثر بـ transform أي حاوية أو مكان الزر،
+  // والعرض والارتفاع محسوبين حسب مساحة الشاشة المتاحة (والتقويم بيسكرول داخلياً لو الشاشة قصيرة)
   useEffect(() => {
-    if (!isOpen || !rootRef.current) return;
+    if (!isOpen) return;
     const compute = () => {
-      const rect = rootRef.current?.getBoundingClientRect();
-      if (!rect) return;
-      if (window.innerWidth < 640) {
-        // 📱 موبايل: شيت عريض أسفل الشاشة بحد أقصى معظم الشاشة
-        setPanelStyle({
-          position: 'fixed',
-          left: 8,
-          right: 8,
-          bottom: 8,
-          width: 'auto',
-          maxHeight: window.innerHeight * 0.92,
-        });
-        return;
-      }
-      const width = Math.min(372, window.innerWidth - 16);
-      const spaceBelow = window.innerHeight - rect.bottom - 16;
-      const spaceAbove = rect.top - 16;
-      const MIN_PANEL_SPACE = 380;
-      const openUp = spaceBelow < MIN_PANEL_SPACE && spaceAbove > spaceBelow;
       setPanelStyle({
-        position: 'fixed',
-        top: openUp ? undefined : rect.bottom + 8,
-        bottom: openUp ? window.innerHeight - rect.top + 8 : undefined,
-        left: Math.max(8, Math.min(rect.left, window.innerWidth - width - 8)),
-        width,
-        maxHeight: Math.max(280, openUp ? spaceAbove : spaceBelow),
+        width: Math.min(380, window.innerWidth - 24),
+        maxHeight: window.innerHeight - 24,
       });
     };
     compute();
-    window.addEventListener('scroll', compute, true);
     window.addEventListener('resize', compute);
-    return () => {
-      window.removeEventListener('scroll', compute, true);
-      window.removeEventListener('resize', compute);
-    };
+    return () => window.removeEventListener('resize', compute);
   }, [isOpen]);
 
   const handlePresetClick = (preset: PresetRange) => {
@@ -432,14 +409,22 @@ export const DateRangeFilter: React.FC<DateRangeFilterProps> = ({
         ) : null}
       </button>
 
-      {/* ═══ Dropdown Panel — مضغوط (~350px) عشان يظهر كامل في نص الشاشة من غير أي سكرول ═══ */}
-      {isOpen && (
-        <div
-          style={panelStyle}
-          role="dialog"
-          aria-label="اختيار نطاق التاريخ"
-          className="z-[70] rounded-t-2xl sm:rounded-2xl border border-gray-200/80 bg-white shadow-2xl shadow-blue-900/15 overflow-y-auto overscroll-contain max-h-[85dvh] animate-pop-in"
-        >
+      {/* ═══ نافذة التقويم — Portal وسط الشاشة بالظبط على كل المقاسات، مع خلفية معتمة تقفل بالضغط عليها ═══ */}
+      {isOpen &&
+        createPortal(
+          <div className="fixed inset-0 z-[70] flex items-center justify-center p-3 sm:p-4">
+            <div
+              className="absolute inset-0 bg-black/35 backdrop-blur-[2px] animate-fade-in"
+              onClick={() => setIsOpen(false)}
+            />
+            <div
+              ref={panelRef}
+              style={panelStyle}
+              role="dialog"
+              aria-modal="true"
+              aria-label="اختيار نطاق التاريخ"
+              className="relative rounded-2xl border border-gray-200/80 bg-white shadow-2xl shadow-blue-900/15 overflow-y-auto overscroll-contain animate-pop-in"
+            >
           {/* ── الهيدر: سطر واحد ── */}
           <div className="bg-gradient-to-l from-[#1d4277] via-[#2e5b9f] to-[#4a7cc9] px-3 py-2 text-white flex items-center justify-between gap-2">
             <p className="text-[11px] font-bold font-mono truncate drop-shadow-sm">
@@ -602,8 +587,10 @@ export const DateRangeFilter: React.FC<DateRangeFilterProps> = ({
               </button>
             )}
           </div>
-        </div>
-      )}
+            </div>
+          </div>,
+          document.body
+        )}
     </div>
   );
 };

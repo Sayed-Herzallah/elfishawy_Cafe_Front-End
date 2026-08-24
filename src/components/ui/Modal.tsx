@@ -48,11 +48,13 @@ export const Modal: React.FC<ModalProps> = ({
         onClick={onClose}
       />
 
-      {/* Modal Dialog */}
+      {/* Modal Dialog — ✅ أقصى ارتفاع = الشاشة: العنوان ثابت والجسم يسكرول داخلياً
+          فالفورمات الطويلة (زي إضافة منتج) تظهر كاملة من غير سكرول الصفحة وعلى أي شاشة */}
       <div
-        className={`relative bg-white rounded-2xl shadow-xl border border-gray-100 w-full ${maxWidthClasses[maxWidth]} p-6 z-10 text-right transform transition-all animate-in fade-in zoom-in-95 duration-150`}
+        className={`relative bg-white rounded-2xl shadow-xl border border-gray-100 w-full ${maxWidthClasses[maxWidth]} z-10 text-right transform transition-all animate-in fade-in zoom-in-95 duration-150 flex flex-col max-h-[calc(100dvh-2rem)]`}
       >
-        <div className="flex flex-row-reverse items-center justify-between pb-4 mb-4 border-b border-gray-100">
+        {/* Header — ثابت فوق */}
+        <div className="flex flex-row-reverse items-center justify-between px-6 pt-5 pb-4 border-b border-gray-100 shrink-0">
           <button
             onClick={onClose}
             className="text-gray-400 hover:text-gray-600 p-1.5 rounded-lg hover:bg-gray-100 transition-colors focus:outline-none focus:ring-2 focus:ring-gray-300"
@@ -62,7 +64,8 @@ export const Modal: React.FC<ModalProps> = ({
           </button>
           {title && <h3 className="text-lg font-bold text-gray-900 font-arabic-heading">{title}</h3>}
         </div>
-        <div>{children}</div>
+        {/* Body — يسكرول داخلياً لو المحتوى أطول من الشاشة */}
+        <div className="px-6 pb-6 pt-4 overflow-y-auto overscroll-contain">{children}</div>
       </div>
     </div>
   );
