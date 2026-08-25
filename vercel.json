@@ -1,18 +1,8 @@
 {
   "rewrites": [
-  "routes": [
     {
-      "source": "/google99adb0f5653e79e4.html",
-      "destination": "/google99adb0f5653e79e4.html"
-      "src": "/google99adb0f5653e79e4.html",
-      "dest": "/google99adb0f5653e79e4.html"
-    },
-    { "handle": "filesystem" },
-    {
-      "source": "/(.*)",
+      "source": "/((?!google99adb0f5653e79e4\\.html$).*)",
       "destination": "/index.html"
-      "src": "/(.*)",
-      "dest": "/index.html"
     }
   ],
   "headers": [
