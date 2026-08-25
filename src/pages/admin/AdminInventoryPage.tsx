@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { inventoryService, expenseService } from '../../services/opsService';
 import { productService, recipeService } from '../../services/catalogService';
-import { syncProductStockAfterRestock } from '../../utils/stockSync';
+import { syncProductStockAfterRestock, syncAllProductsStock } from '../../utils/stockSync';
 import { InventoryItem, Expense } from '../../types';
 import { useNotification } from '../../contexts/NotificationContext';
 import { useAuth } from '../../contexts/AuthContext';
