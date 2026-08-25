@@ -51,15 +51,24 @@ export const LoginPage: React.FC = () => {
     <div className="min-h-screen flex flex-col md:flex-row bg-[#fcfaf7] text-[#1c1917] font-sans antialiased">
       {/* Left Brand Panel (Figma login.png) */}
       <div className="hidden md:flex md:w-5/12 bg-[#2e5b9f] flex-col items-center justify-center p-12 text-white relative overflow-hidden">
-        {/* Circular Stamp Graphic */}
-        <div className="relative flex flex-col items-center justify-center p-8 rounded-full border-2 border-dashed border-white/40 w-64 h-64 text-center">
-          <div className="absolute inset-0 flex items-center justify-center animate-spin-slow">
-            {/* <span className="text-sm font-bold tracking-widest font-mono text-white/80">
-              LEDGER & ESPRESSO •
-            </span> */}
+        {/* Circular Stamp Graphic — هوية متحركة: حلقتان تدوران باتجاهين + فنجان يطفو */}
+        <div className="relative w-72 h-72 flex items-center justify-center">
+          {/* هالة ضوئية تتنفس خلف الفنجان */}
+          <div className="absolute inset-8 rounded-full bg-white/10 blur-2xl animate-brand-glow" />
+
+          {/* الحلقة المتقطعة الخارجية — دوران بطيء مستمر */}
+          <div className="absolute inset-0 rounded-full border-2 border-dashed border-white/40 animate-brand-spin" />
+
+          {/* الحلقة الداخلية المنقطة — دوران عكسي أبطأ لعمق بصري */}
+          <div className="absolute inset-5 rounded-full border border-dotted border-white/25 animate-brand-spin-reverse" />
+
+          {/* المحتوى: الفنجان يطفو والاسم يتنفس */}
+          <div className="relative flex flex-col items-center animate-brand-float">
+            <Coffee className="w-16 h-16 text-white drop-shadow-lg" />
+            <div className="text-xs font-bold mt-3 font-mono tracking-[0.28em] animate-brand-breathe">
+              EL-FISHAWY
+            </div>
           </div>
-          <Coffee className="w-16 h-16 text-white drop-shadow-md" />
-          <div className="text-xs font-bold mt-2 font-mono tracking-wider">EL-FISHAWY</div>
         </div>
 
         <div className="absolute bottom-8 text-center text-xs text-blue-200/80 font-mono">

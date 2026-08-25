@@ -12,6 +12,7 @@ import { AttaStatCard } from '../../components/ui/AttaStatCard';
 import { ComparisonStatCard } from '../../components/ui/ComparisonStatCard';
 import { ExportModal } from '../../components/ui/ExportModal';
 import { DateRangeFilter, DateRange } from '../../components/ui/DateRangeFilter';
+import { isStockLow, isStockOut } from '../../utils/stockStatus';
 import { exportElementToPdf } from '../../utils/pdfExport';
 import {
   formatPrice,
@@ -89,9 +90,9 @@ export const AdminDashboardPage: React.FC = () => {
         setRecentOrders(ordersRes.data.slice(0, 6));
       }
       if (invRes.success && invRes.data) {
-        // ✅ القائمة الكاملة لحساب قيمة المخزون + اشتقاق النواقص منها
+        // ✅ القائمة الكاملة لحساب قيمة المخزون + اشتقاق النواقص منها (منخفض + نافذ)
         setAllInventory(invRes.data);
-        setLowStockItems(invRes.data.filter((i) => i.quantity <= i.minLimit));
+        setLowStockItems(invRes.data.filter((i) => isStockLow(i.quantity, i.minLimit) || isStockOut(i.quantity)));
       }
       if (expRes.success && expRes.data) setExpenses(expRes.data);
       if (prodRes?.success && prodRes.data) setAllProducts(prodRes.data);
@@ -129,7 +130,7 @@ export const AdminDashboardPage: React.FC = () => {
         }
         if (Array.isArray(cached.inventory)) {
           setAllInventory(cached.inventory);
-          setLowStockItems(cached.inventory.filter((i: InventoryItem) => i.quantity <= i.minLimit));
+          setLowStockItems(cached.inventory.filter((i: InventoryItem) => isStockLow(i.quantity, i.minLimit) || isStockOut(i.quantity)));
         }
         if (Array.isArray(cached.expenses)) setExpenses(cached.expenses);
         if (Array.isArray(cached.products)) setAllProducts(cached.products);
@@ -884,32 +885,40 @@ export const AdminDashboardPage: React.FC = () => {
             </div>
           ) : (
             <div className="space-y-2">
-              {lowStockItems.slice(0, 3).map((item) => (
-                <div
-                  key={item._id}
-                  className="p-3 rounded-2xl bg-amber-50/70 border border-amber-200 flex items-center justify-between text-xs"
-                >
-                  <button
-                    onClick={() => navigate('/admin/inventory')}
-                    className="font-bold text-[#2e5b9f] hover:underline text-[11px]"
+              {lowStockItems.slice(0, 3).map((item) => {
+                const out = isStockOut(item.quantity);
+                return (
+                  <div
+                    key={item._id}
+                    className={`p-3 rounded-2xl border flex items-center justify-between text-xs ${
+                      out ? 'bg-rose-50/70 border-rose-200' : 'bg-amber-50/70 border-amber-200'
+                    }`}
                   >
-                    توريد ←
-                  </button>
-                  <div className="flex items-center gap-2 text-right">
-                    <div>
-                      <span className="font-bold text-amber-900 text-xs block">
-                        {item.name}: <strong className="font-mono text-amber-950">{formatNumber(item.quantity)} {item.unit}</strong>
-                      </span>
-                      {item.costPrice ? (
-                        <span className="text-[10px] text-amber-700 font-mono block mt-0.5">
-                          التكلفة: {formatPrice(item.costPrice)} / {item.unit}
+                    <button
+                      onClick={() => navigate('/admin/inventory')}
+                      className={`font-bold hover:underline text-[11px] ${out ? 'text-rose-700' : 'text-[#2e5b9f]'}`}
+                    >
+                      توريد ←
+                    </button>
+                    <div className="flex items-center gap-2 text-right">
+                      <div>
+                        <span className={`font-bold text-xs block ${out ? 'text-rose-900' : 'text-amber-900'}`}>
+                          {item.name}: <strong className="font-mono text-amber-950">{formatNumber(item.quantity)} {item.unit}</strong>
+                          <span className={`text-[10px] font-bold mr-1.5 ${out ? 'text-rose-600' : 'text-amber-600'}`}>
+                            ({out ? 'نافذ — يحتاج توريد فوري' : 'منخفض — قريب من حد الأمان'})
+                          </span>
                         </span>
-                      ) : null}
+                        {item.costPrice ? (
+                          <span className="text-[10px] text-amber-700 font-mono block mt-0.5">
+                            التكلفة: {formatPrice(item.costPrice)} / {item.unit}
+                          </span>
+                        ) : null}
+                      </div>
+                      <AlertTriangle className={`w-4 h-4 flex-shrink-0 ${out ? 'text-rose-600' : 'text-amber-600'}`} />
                     </div>
-                    <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0" />
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>

@@ -1,5 +1,6 @@
 import React, { Suspense, lazy } from 'react';
 import { Routes, Route } from 'react-router-dom';
+import { Coffee } from 'lucide-react';
 import { PublicLayout } from '../components/layout/PublicLayout';
 import { AdminLayout } from '../components/layout/AdminLayout';
 import { CashierLayout } from '../components/layout/CashierLayout';
@@ -38,9 +39,11 @@ const SafePage: React.FC<{ children: React.ReactNode }> = ({ children }) => (
     <Suspense
       fallback={
         <div className="min-h-[50vh] flex items-center justify-center">
-          <div className="flex flex-col items-center gap-3">
-            <div className="w-9 h-9 rounded-full border-[3px] border-[#2e5b9f]/20 border-t-[#2e5b9f] animate-spin" />
-            <span className="text-xs font-bold text-gray-400">جارٍ التحميل...</span>
+          {/* نسخة مصغرة من هوية الفيشاوي المتحركة — اتساق مع شاشة الدخول */}
+          <div className="relative w-20 h-20 flex items-center justify-center">
+            <div className="absolute inset-0 rounded-full border-2 border-dashed border-[#2e5b9f]/40 animate-brand-spin" />
+            <div className="absolute inset-1.5 rounded-full border border-dotted border-[#2e5b9f]/25 animate-brand-spin-reverse" />
+            <Coffee className="w-7 h-7 text-[#2e5b9f] animate-brand-float" />
           </div>
         </div>
       }

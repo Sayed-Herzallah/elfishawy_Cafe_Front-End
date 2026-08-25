@@ -205,3 +205,49 @@ input[type='number'] {
 .animate-slide-in-right {
   animation: slide-in-right 0.2s ease-out;
 }
+@keyframes brand-spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes brand-spin-reverse {
+  to { transform: rotate(-360deg); }
+}
+@keyframes brand-float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-9px); }
+}
+@keyframes brand-glow {
+  0%, 100% { transform: scale(1); opacity: 0.35; }
+  50% { transform: scale(1.1); opacity: 0.8; }
+}
+@keyframes brand-breathe {
+  0%, 100% { opacity: 0.8; letter-spacing: 0.28em; }
+  50% { opacity: 1; letter-spacing: 0.4em; }
+}
+
+.animate-brand-spin {
+  animation: brand-spin 24s linear infinite;
+  will-change: transform;
+}
+.animate-brand-spin-reverse {
+  animation: brand-spin-reverse 36s linear infinite;
+  will-change: transform;
+}
+.animate-brand-float {
+  animation: brand-float 5s ease-in-out infinite;
+  will-change: transform;
+}
+.animate-brand-glow {
+  animation: brand-glow 4.5s ease-in-out infinite;
+}
+.animate-brand-breathe {
+  animation: brand-breathe 5s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-brand-spin,
+  .animate-brand-spin-reverse,
+  .animate-brand-float,
+  .animate-brand-glow,
+  .animate-brand-breathe {
+    animation: none;
+  }
+}

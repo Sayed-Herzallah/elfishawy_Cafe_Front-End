@@ -12,6 +12,7 @@ import { Select } from '../../components/ui/Select';
 import { Badge } from '../../components/ui/Badge';
 import { LoadingSkeleton } from '../../components/ui/LoadingSkeleton';
 import { useInventorySync } from '../../hooks/useInventorySync';
+import { isStockLow, isStockOut } from '../../utils/stockStatus';
 import { formatPrice, formatNumber, formatDate } from '../../utils/formatters';
 import {
   Plus,
@@ -265,8 +266,8 @@ export const CashierInventoryPage: React.FC = () => {
 
   const filteredItems = items.filter((item) => {
     const matchesSearch = item.name.toLowerCase().includes(searchQuery.trim().toLowerCase());
-    if (filterMode === 'low') return matchesSearch && item.quantity > 0 && item.quantity <= item.minLimit;
-    if (filterMode === 'out') return matchesSearch && item.quantity <= 0;
+    if (filterMode === 'low') return matchesSearch && isStockLow(item.quantity, item.minLimit);
+    if (filterMode === 'out') return matchesSearch && isStockOut(item.quantity);
     return matchesSearch;
   });
 
@@ -458,8 +459,8 @@ export const CashierInventoryPage: React.FC = () => {
               </thead>
               <tbody className="divide-y divide-gray-100 text-gray-800">
                 {filteredItems.map((item) => {
-                  const isOut = item.quantity <= 0;
-                  const isLow = !isOut && item.quantity <= item.minLimit;
+                  const isOut = isStockOut(item.quantity);
+                  const isLow = isStockLow(item.quantity, item.minLimit);
                   const costInfo = costSummaryFor(item);
 
                   return (

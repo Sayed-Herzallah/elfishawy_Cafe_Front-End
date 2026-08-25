@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { inventoryService, expenseService } from '../../services/opsService';
 import { productService, recipeService } from '../../services/catalogService';
 import { syncProductStockAfterRestock, syncAllProductsStock } from '../../utils/stockSync';
+import { isStockLow, isStockOut } from '../../utils/stockStatus';
 import { InventoryItem, Expense } from '../../types';
 import { useNotification } from '../../contexts/NotificationContext';
 import { useAuth } from '../../contexts/AuthContext';
@@ -374,8 +375,8 @@ export const AdminInventoryPage: React.FC = () => {
     }
   };
 
-  const lowStockCount = items.filter((i) => i.quantity > 0 && i.quantity <= i.minLimit).length;
-  const outOfStockCount = items.filter((i) => i.quantity <= 0).length;
+  const lowStockCount = items.filter((i) => isStockLow(i.quantity, i.minLimit)).length;
+  const outOfStockCount = items.filter((i) => isStockOut(i.quantity)).length;
 
   const filteredItems = items.filter((item) => {
     const matchesSearch = item.name.toLowerCase().includes(searchQuery.trim().toLowerCase());
@@ -389,14 +390,14 @@ export const AdminInventoryPage: React.FC = () => {
       if (dateTo && itemDate > new Date(`${dateTo}T23:59:59.999`)) return false;
     }
 
-    if (filterMode === 'low') return item.quantity > 0 && item.quantity <= item.minLimit;
-    if (filterMode === 'out') return item.quantity <= 0;
+    if (filterMode === 'low') return isStockLow(item.quantity, item.minLimit);
+    if (filterMode === 'out') return isStockOut(item.quantity);
     return true;
   });
 
   // 📊 كل الإحصائيات بتتحسب من النتائج المعروضة بعد الفلترة — مش من كل الأصناف
-  const shownLowCount = filteredItems.filter((i) => i.quantity > 0 && i.quantity <= i.minLimit).length;
-  const shownOutCount = filteredItems.filter((i) => i.quantity <= 0).length;
+  const shownLowCount = filteredItems.filter((i) => isStockLow(i.quantity, i.minLimit)).length;
+  const shownOutCount = filteredItems.filter((i) => isStockOut(i.quantity)).length;
   const shownValue = filteredItems.reduce((sum, i) => sum + (costSummaryFor(i).total || 0), 0);
   const shownAvailableCount = Math.max(0, filteredItems.length - shownLowCount - shownOutCount);
   const availablePct = filteredItems.length > 0 ? Math.round((shownAvailableCount / filteredItems.length) * 100) : 0;
@@ -550,8 +551,8 @@ export const AdminInventoryPage: React.FC = () => {
               {/* Mobile & Tablet Card Layout (< md) */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 md:hidden">
                 {filteredItems.map((item) => {
-                  const isLow = item.quantity > 0 && item.quantity <= item.minLimit;
-                  const isOut = item.quantity <= 0;
+                  const isLow = isStockLow(item.quantity, item.minLimit);
+                  const isOut = isStockOut(item.quantity);
                   const restockerName = resolveRestockerName(item) || null;
                   const costInfo = costSummaryFor(item);
 
@@ -1065,10 +1066,10 @@ return (
               <div className="p-3 bg-white rounded-xl border border-gray-200">
                 <span className="text-[10px] text-gray-400 font-bold block">الحالة</span>
                 <Badge
-                  variant={viewingItem.quantity <= 0 ? 'out' : viewingItem.quantity <= viewingItem.minLimit ? 'low' : 'available'}
+                  variant={isStockOut(viewingItem.quantity) ? 'out' : isStockLow(viewingItem.quantity, viewingItem.minLimit) ? 'low' : 'available'}
                   size="sm"
                 >
-                  {viewingItem.quantity <= 0 ? 'نفد المخزون' : viewingItem.quantity <= viewingItem.minLimit ? 'مخزون منخفض' : 'متوفر ومستقر'}
+                  {isStockOut(viewingItem.quantity) ? 'نفد المخزون' : isStockLow(viewingItem.quantity, viewingItem.minLimit) ? 'مخزون منخفض' : 'متوفر ومستقر'}
                 </Badge>
               </div>
               <div className="p-3 bg-white rounded-xl border border-gray-200">

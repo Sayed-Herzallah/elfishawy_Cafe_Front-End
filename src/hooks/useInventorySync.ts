@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { inventoryService } from '../services/opsService';
 import { InventoryItem } from '../types';
 import { useNotification } from '../contexts/NotificationContext';
+import { isStockLow, isStockOut } from '../utils/stockStatus';
 
 interface InventoryState {
   items: InventoryItem[];
@@ -27,8 +28,8 @@ export const useInventorySync = (pollInterval = 30000) => {
       const res = await inventoryService.listInventory();
       if (res.success && res.data) {
         const items = res.data;
-        const lowStock = items.filter(item => item.quantity > 0 && item.quantity <= item.minLimit);
-        const outOfStock = items.filter(item => item.quantity <= 0);
+        const lowStock = items.filter(item => isStockLow(item.quantity, item.minLimit));
+        const outOfStock = items.filter(item => isStockOut(item.quantity));
 
         setState(prev => ({
           ...prev,

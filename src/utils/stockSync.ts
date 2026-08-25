@@ -10,6 +10,13 @@ export const toBase = (qty: number, unit: string): number => {
 };
 
 /**
+ * ⚠️ تمت إزالة "الربط بالأسماء" نهائيًا — كان بيربط المنتج بأي خام اسمه قريب
+ * (مثل: منتج "شاي" مع خام زبالة اسمه "00000شاي") وبيملّي أرصدة وهمية.
+ * المزامنة دلولتً تعتمد على الوصفات فقط — لو الوصفة مكسورة (منتجها اتمسح)
+ * يتم تخطيها بأمان بدون أي تحديث خاطئ.
+ */
+
+/**
  * Recalculate and update stockQuantity on the server for a specific product.
  * Sends the full product details (name, price, category) to pass backend validations.
  */
@@ -18,15 +25,15 @@ async function updateProductStockOnServer(product: any, newQty: number): Promise
     const fd = new FormData();
     fd.append('name', product.name);
     fd.append('price', String(product.price));
-    
-    const catId = typeof product.category === 'string' 
-      ? product.category 
+
+    const catId = typeof product.category === 'string'
+      ? product.category
       : (product.category?._id || '');
     fd.append('category', catId);
-    
+
     fd.append('stockQuantity', String(newQty));
     fd.append('inStock', String(newQty > 0));
-    
+
     if (product.description) {
       fd.append('description', product.description);
     }
@@ -39,12 +46,38 @@ async function updateProductStockOnServer(product: any, newQty: number): Promise
   }
 }
 
+/** استخراج معرف المنتج من الوصفة سواء كان ID أو object معبأ — أو null لو مكسورة */
+const recipeProductId = (recipe: any): string | null => {
+  const p = recipe?.product;
+  if (!p) return null;
+  if (typeof p === 'string') return p;
+  return p._id || null;
+};
+
+/** حساب المتاح من وصفة واحدة بناءً على أرصدة مكوناتها */
+const calcRecipeAvailability = (recipe: any, allInventory: any[]): number | null => {
+  if (!recipe?.ingredients?.length) return null;
+
+  let minAvailable = Infinity;
+  for (const ing of recipe.ingredients) {
+    const ingId = typeof ing.inventoryItem === 'string' ? ing.inventoryItem : ing.inventoryItem?._id;
+    const invItem = allInventory.find((i: any) => i._id === ingId);
+    if (!invItem || invItem.quantity <= 0) return 0;
+
+    const inputQtyBase = toBase(ing.inputQuantity || 1, ing.inputUnit || 'KG');
+    const consumePerUnit = inputQtyBase / (ing.outputQuantity || 1);
+    const invBase = toBase(invItem.quantity, invItem.unit);
+    const available = consumePerUnit > 0 ? Math.floor(invBase / consumePerUnit) : Infinity;
+    minAvailable = Math.min(minAvailable, available);
+  }
+
+  return Number.isFinite(minAvailable) ? minAvailable : 0;
+};
+
 /**
  * After restocking an inventory item, recalculate and update stockQuantity
  * for all products that use this item via recipes (bill of materials).
- *
- * FALLBACK: If no recipes are found, try to find products whose name
- * closely matches the inventory item name and update their stock directly.
+ * الوصفات المكسورة (منتجها اتمسح) يتم تجاهلها بأمان.
  */
 export async function syncProductStockAfterRestock(inventoryItemId: string): Promise<number> {
   try {
@@ -62,82 +95,28 @@ export async function syncProductStockAfterRestock(inventoryItemId: string): Pro
     const allProducts = productsRes.data;
     const allInventory = invRes.data;
 
-    const restockedItem = allInventory.find((i: any) => i._id === inventoryItemId);
-
-    // ── PATH 1: Recipe-based sync ────────────────────────────────────────────
-    const affectedRecipes = allRecipes.filter((recipe: any) =>
-      recipe.ingredients?.some((ing: any) => {
-        const ingId = typeof ing.inventoryItem === 'string'
-          ? ing.inventoryItem
-          : ing.inventoryItem?._id;
+    // الوصفات المتأثرة بالخام المتورّد — مع تجاهل الوصفات المكسورة (product: null)
+    const affectedRecipes = allRecipes.filter((recipe: any) => {
+      if (!recipeProductId(recipe)) return false;
+      return recipe.ingredients?.some((ing: any) => {
+        const ingId = typeof ing.inventoryItem === 'string' ? ing.inventoryItem : ing.inventoryItem?._id;
         return ingId === inventoryItemId;
-      })
-    );
+      });
+    });
 
     let updatedCount = 0;
 
-    if (affectedRecipes.length > 0) {
-      for (const recipe of affectedRecipes) {
-        const productId = typeof recipe.product === 'string'
-          ? recipe.product
-          : recipe.product?._id;
-        if (!productId) continue;
+    for (const recipe of affectedRecipes) {
+      const productId = recipeProductId(recipe);
+      const product = allProducts.find((p: any) => p._id === productId);
+      if (!product) continue;
 
-        const product = allProducts.find((p: any) => p._id === productId);
-        if (!product) continue;
+      const newQty = calcRecipeAvailability(recipe, allInventory);
+      if (newQty === null) continue;
 
-        let minAvailable = Infinity;
-
-        for (const ing of recipe.ingredients) {
-          const ingId = typeof ing.inventoryItem === 'string'
-            ? ing.inventoryItem
-            : ing.inventoryItem?._id;
-
-          const invItem = allInventory.find((i: any) => i._id === ingId);
-          if (!invItem || invItem.quantity <= 0) {
-            minAvailable = 0;
-            break;
-          }
-
-          const inputQtyBase = toBase(ing.inputQuantity || 1, ing.inputUnit || 'KG');
-          const consumePerUnit = inputQtyBase / (ing.outputQuantity || 1);
-          const invBase = toBase(invItem.quantity, invItem.unit);
-          const available = consumePerUnit > 0 ? Math.floor(invBase / consumePerUnit) : Infinity;
-          minAvailable = Math.min(minAvailable, available);
-        }
-
-        const newQty = Number.isFinite(minAvailable) ? minAvailable : 0;
-        
-        if (product.stockQuantity !== newQty) {
-          const success = await updateProductStockOnServer(product, newQty);
-          if (success) updatedCount++;
-        }
-      }
-
-      return updatedCount;
-    }
-
-    // ── PATH 2: Name-based fallback (no recipe found) ────────────────────────
-    if (restockedItem) {
-      const itemName = restockedItem.name.trim().toLowerCase();
-      const newQty = Math.max(0, Math.floor(toBase(restockedItem.quantity, restockedItem.unit) / 100));
-      const fallbackQty = newQty > 0 ? newQty : (restockedItem.quantity > 0 ? 1 : 0);
-
-      const matchingProducts = allProducts.filter((p: any) => {
-        const pName = (p.name || '').trim().toLowerCase();
-        return (
-          pName.includes(itemName) ||
-          itemName.includes(pName) ||
-          pName.split(' ').some((word: string) => word.length > 2 && itemName.includes(word)) ||
-          itemName.split(' ').some((word: string) => word.length > 2 && pName.includes(word))
-        );
-      });
-
-      for (const prod of matchingProducts) {
-        if (prod.stockQuantity !== fallbackQty) {
-          const success = await updateProductStockOnServer(prod, fallbackQty);
-          if (success) updatedCount++;
-        }
+      if (product.stockQuantity !== newQty) {
+        const success = await updateProductStockOnServer(product, newQty);
+        if (success) updatedCount++;
       }
     }
 
@@ -149,8 +128,8 @@ export async function syncProductStockAfterRestock(inventoryItemId: string): Pro
 }
 
 /**
- * Synchronize all products' stock levels with the current inventory.
- * Useful to run once on page load to fix any pre-existing desyncs.
+ * Synchronize all products' stock levels with the current inventory — via recipes ONLY.
+ * المنتجات بدون وصفة صالحة لا يتم لمسها إطلاقًا (رصيدها يدوي للأدمن).
  */
 export async function syncAllProductsStock(): Promise<number> {
   try {
@@ -171,52 +150,13 @@ export async function syncAllProductsStock(): Promise<number> {
     let updatedCount = 0;
 
     for (const product of allProducts) {
-      let finalQty = 0;
-      let hasSyncSource = false;
+      const recipe = allRecipes.find((r: any) => recipeProductId(r) === product._id);
+      if (!recipe) continue; // بدون وصفة صالحة → الرصيد يدوي، ممنوع نلمسه
 
-      const recipe = allRecipes.find((r: any) => {
-        const pId = typeof r.product === 'string' ? r.product : r.product?._id;
-        return pId === product._id;
-      });
+      const finalQty = calcRecipeAvailability(recipe, allInventory);
+      if (finalQty === null) continue;
 
-      if (recipe && recipe.ingredients && recipe.ingredients.length > 0) {
-        hasSyncSource = true;
-        let minAvailable = Infinity;
-        for (const ing of recipe.ingredients) {
-          const ingId = typeof ing.inventoryItem === 'string' ? ing.inventoryItem : ing.inventoryItem?._id;
-          const invItem = allInventory.find((i: any) => i._id === ingId);
-          if (!invItem || invItem.quantity <= 0) {
-            minAvailable = 0;
-            break;
-          }
-          const inputQtyBase = toBase(ing.inputQuantity || 1, ing.inputUnit || 'KG');
-          const consumePerUnit = inputQtyBase / (ing.outputQuantity || 1);
-          const invBase = toBase(invItem.quantity, invItem.unit);
-          const available = consumePerUnit > 0 ? Math.floor(invBase / consumePerUnit) : Infinity;
-          minAvailable = Math.min(minAvailable, available);
-        }
-        finalQty = Number.isFinite(minAvailable) ? minAvailable : 0;
-      } else {
-        const pName = (product.name || '').trim().toLowerCase();
-        const matchingInv = allInventory.find((item: any) => {
-          const itemName = (item.name || '').trim().toLowerCase();
-          return (
-            pName.includes(itemName) ||
-            itemName.includes(pName) ||
-            pName.split(' ').some((word: string) => word.length > 2 && itemName.includes(word)) ||
-            itemName.split(' ').some((word: string) => word.length > 2 && pName.includes(word))
-          );
-        });
-
-        if (matchingInv) {
-          hasSyncSource = true;
-          const baseQty = toBase(matchingInv.quantity, matchingInv.unit);
-          const calculated = Math.floor(baseQty / 100);
-          finalQty = calculated > 0 ? calculated : (matchingInv.quantity > 0 ? 1 : 0);
-        }
-      }
-
-      if (hasSyncSource && product.stockQuantity !== finalQty) {
+      if (product.stockQuantity !== finalQty) {
         const success = await updateProductStockOnServer(product, finalQty);
         if (success) updatedCount++;
       }
