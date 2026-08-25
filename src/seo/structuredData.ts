@@ -25,12 +25,12 @@ export const buildCafeSchema = () => ({
   url: SITE_URL,
   image: DEFAULT_OG_IMAGE,
   description:
-    'كافيه تراثي في قلب خان الخليلي والجمالية بالقاهرة، يقدم قهوة بلدي على الرمل وشاي وعصائر طازجة في أجواء دافئة.',
+    'كافيه تراثي في ههيا بالشرقية، يقدم قهوة بلدي على الرمل وشاي وعصائر طازجة في أجواء دافئة ومميزة.',
   servesCuisine: ['قهوة', 'مشروبات ساخنة', 'عصائر طازجة'],
   priceRange: 'EGP',
   address: {
     '@type': 'PostalAddress',
-    addressLocality: 'القاهرة',
+    addressLocality: 'ههيا، الشرقية',
     addressCountry: 'EG',
   },
   hasMenu: `${SITE_URL}/menu`,
