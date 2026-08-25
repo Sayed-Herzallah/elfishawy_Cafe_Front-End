@@ -140,6 +140,20 @@ export const AdminInventoryPage: React.FC = () => {
     loadInventory();
   }, []);
 
+  // 🔄 مزامنة أرصدة المنتجات مع المخزن عند فتح الصفحة —
+  // رصيد المنتج بيترجع يتحسب من وصفته (الخام المتاح) لو حصل تضارب،
+  // زي منتج وصل صفر بينما الخام لسه فيه رصيد يكفي أكواب جديدة.
+  useEffect(() => {
+    let cancelled = false;
+    syncAllProductsStock().then((updatedCount) => {
+      if (!cancelled && updatedCount > 0) {
+        showToast(`🔄 تمت مزامنة ${updatedCount} منتج مع أرصدة المخزن تلقائياً`, 'info');
+      }
+    }).catch(() => { /* المزامنة تحسينية — فشلها لا يؤثر على الصفحة */ });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const handleFilterReset = () => {
     setSearchQuery('');
     setFilterMode('all');
