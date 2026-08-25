@@ -2,6 +2,8 @@
 import { expenseService, inventoryService } from '../../services/opsService';
 import { Expense, InventoryItem, ExpenseCategory } from '../../types';
 import { useNotification } from '../../contexts/NotificationContext';
+import { syncAllProductsStock, ensurePurchaseRestockAndSync } from '../../utils/stockSync';
+import { playSuccessSound } from '../../utils/soundFeedback';
 import { StatCard } from '../../components/ui/StatCard';
 import { ComparisonStatCard } from '../../components/ui/ComparisonStatCard';
 import { DateRangeFilter, DateRange, toLocalDateString } from '../../components/ui/DateRangeFilter';
@@ -182,6 +184,14 @@ export const AdminExpensesPage: React.FC = () => {
 
     try {
       setIsSubmitting(true);
+
+      // 🔍 رصيد الخام قبل التسجيل — عشان نتحقق بعدها إن الرصيد زاد فعلاً
+      const linkedItem = inventoryItems.find((i) => i._id === formData.inventoryItemLinked);
+      const qtyBefore = linkedItem ? Number(linkedItem.quantity) : null;
+      const purchaseQty = Number(formData.inventoryQuantityAdded) || 0;
+      const purchaseUnitCost =
+        purchaseQty > 0 ? Number((Number(formData.amount) / purchaseQty).toFixed(2)) : undefined;
+
       const res = await expenseService.createExpense({
         description: formData.description.trim(),
         amount: Number(formData.amount),
@@ -199,6 +209,24 @@ export const AdminExpensesPage: React.FC = () => {
 
       if (res.success) {
         showToast('تم تسجيل المصروف بنجاح وتحديث السجلات');
+
+        // ✅ ربط المشتريات بالمنتجات — مضمون على كل الحالات:
+        // نتأكد إن رصيد الخام زاد فعلاً (لو الـ Backend مازودش من القيد بنعمل restock
+        // صريح) — وبعدها نعيد حساب أرصدة المنتجات المرتبطة بالوصفة، فالمنتجات اللي
+        // كانت نافدة بتفتح تلقائياً وتظهر متاحة في الكاشير والمنيو فوراً.
+        if (formData.category === 'inventory' && formData.inventoryItemLinked) {
+          playSuccessSound();
+          const { updatedProducts } = await ensurePurchaseRestockAndSync({
+            itemId: formData.inventoryItemLinked,
+            qtyBefore,
+            addQty: purchaseQty,
+            unitCost: purchaseUnitCost,
+          });
+          if (updatedProducts > 0) {
+            showToast(`🔄 تم تحديث ${updatedProducts} منتج مرتبط وأصبح متاحاً للبيع`, 'info');
+          }
+        }
+
         setIsAddModalOpen(false);
         setFormErrors({});
         setFormData({
@@ -263,6 +291,17 @@ export const AdminExpensesPage: React.FC = () => {
 
       if (res.success) {
         showToast('تم تحديث المصروف بنجاح');
+
+        // ✅ تعديل قيد شراء مرتبط بمخزون = تغيّر رصيد الخام — نعيد مزامنة أرصدة المنتجات
+        const touchesInventory =
+          editingExpense?.category === 'inventory' || editFormData.category === 'inventory';
+        if (touchesInventory) {
+          const updatedCount = await syncAllProductsStock().catch(() => 0);
+          if (updatedCount > 0) {
+            showToast(`🔄 تمت إعادة مزامنة ${updatedCount} منتج مع أرصدة المخزن`, 'info');
+          }
+        }
+
         setIsEditModalOpen(false);
         setIsEditFormSubmitted(false);
         setEditFormErrors({});
@@ -282,10 +321,20 @@ export const AdminExpensesPage: React.FC = () => {
 
   const handleConfirmDelete = async () => {
     if (!deleteTarget) return;
+    const wasInventoryLinked = expenses.find((e) => e._id === deleteTarget.id)?.category === 'inventory';
     try {
       const res = await expenseService.deleteExpense(deleteTarget.id);
       if (res.success) {
         showToast('تم حذف قيد المصروف بنجاح');
+
+        // ✅ حذف قيد شراء مرتبط بمخزون = الباك إند بيرجّع الكمية للصنف — نعيد مزامنة المنتجات
+        if (wasInventoryLinked) {
+          const updatedCount = await syncAllProductsStock().catch(() => 0);
+          if (updatedCount > 0) {
+            showToast(`🔄 تمت إعادة مزامنة ${updatedCount} منتج مع أرصدة المخزن`, 'info');
+          }
+        }
+
         loadData();
       }
     } catch (err) {

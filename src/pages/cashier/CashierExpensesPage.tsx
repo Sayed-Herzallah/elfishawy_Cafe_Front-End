@@ -12,6 +12,8 @@ import { DateRangeFilter, toLocalDateString } from '../../components/ui/DateRang
 import { DashboardFilterBar } from '../../components/ui/DashboardFilterBar';
 import { exportElementToPdf } from '../../utils/pdfExport';
 import { formatPrice, formatNumber, formatDate, formatTime } from '../../utils/formatters';
+import { ensurePurchaseRestockAndSync } from '../../utils/stockSync';
+import { playSuccessSound } from '../../utils/soundFeedback';
 import {
   Plus,
   ShoppingBag,
@@ -155,6 +157,13 @@ export const CashierExpensesPage: React.FC = () => {
     try {
       setIsSubmitting(true);
 
+      // 🔍 رصيد الخام قبل التسجيل — عشان نتحقق بعدها إن الرصيد زاد فعلاً
+      const linkedItem = inventoryItems.find((i) => i._id === formData.inventoryItemLinked);
+      const qtyBefore = linkedItem ? Number(linkedItem.quantity) : null;
+      const purchaseQty = Number(formData.quantity);
+      const purchaseUnitCost =
+        purchaseQty > 0 ? Number((Number(formData.amount) / purchaseQty).toFixed(2)) : undefined;
+
       const descriptionPrefix = formData.supplierName
         ? `[مورد: ${formData.supplierName.trim()}] `
         : '';
@@ -169,18 +178,16 @@ export const CashierExpensesPage: React.FC = () => {
         amount: Number(formData.amount),
         category: 'inventory',
         inventoryItemLinked: formData.inventoryItemLinked || undefined,
-        inventoryQuantityAdded: formData.quantity ? Number(formData.quantity) : undefined,
+        inventoryQuantityAdded: formData.quantity ? purchaseQty : undefined,
         // الإجمالي وسعر الوحدة بيتسجلوا على القيد — الباك إند بيرفع سعر تكلفة الصنف تلقائياً
         totalCost: Number(formData.amount),
-        unitCost:
-          formData.quantity && Number(formData.quantity) > 0
-            ? Number((Number(formData.amount) / Number(formData.quantity)).toFixed(2))
-            : undefined,
+        unitCost: purchaseUnitCost,
         date: formData.date ? new Date(formData.date).toISOString() : new Date().toISOString(),
       });
 
       if (res.success) {
-        showToast('تم تسجيل فاتورة الشراء وتوريد الكمية بنجاح');
+        playSuccessSound();
+        showToast('تم تسجيل فاتورة الشراء بنجاح');
         setIsAddModalOpen(false);
         setFormErrors({});
         setFormData({
@@ -195,6 +202,21 @@ export const CashierExpensesPage: React.FC = () => {
           date: new Date().toISOString().slice(0, 10),
         });
         loadData();
+
+        // ✅ مضمون التوريد: نتأكد إن رصيد الخام زاد فعلاً (لو الـ Backend مازودش من
+        // القيد بنعمل restock صريح) — وبعدها نزامن المنتجات المرتبطة فوراً
+        // فالمنتجات النافدة بتفتح مباشرة في الكاشير والمنيو.
+        if (formData.inventoryItemLinked) {
+          const { updatedProducts } = await ensurePurchaseRestockAndSync({
+            itemId: formData.inventoryItemLinked,
+            qtyBefore,
+            addQty: purchaseQty,
+            unitCost: purchaseUnitCost,
+          });
+          if (updatedProducts > 0) {
+            showToast(`🔄 تم تحديث ${updatedProducts} منتج مرتبط وأصبح متاحاً للبيع`, 'info');
+          }
+        }
       }
     } catch (err) {
       showError(err);

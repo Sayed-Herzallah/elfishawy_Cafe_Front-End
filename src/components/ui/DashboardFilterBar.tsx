@@ -21,6 +21,8 @@ export interface DashboardFilterBarProps {
   activeCount?: number;
   onReset?: () => void;
   resetLabel?: string;
+  /** إظهار زر مسح الفلاتر دائماً حتى لو مفيش فلاتر نشطة */
+  alwaysShowReset?: boolean;
   /** عدد النتائج بعد التصفية + وصفها */
   resultCount?: number;
   resultLabel?: string;
@@ -45,6 +47,7 @@ export const DashboardFilterBar: React.FC<DashboardFilterBarProps> = ({
   activeCount = 0,
   onReset,
   resetLabel = 'مسح الفلاتر',
+  alwaysShowReset = false,
   resultCount,
   resultLabel = 'نتيجة',
   children,
@@ -133,18 +136,24 @@ export const DashboardFilterBar: React.FC<DashboardFilterBarProps> = ({
             </span>
           )}
 
-          {activeCount > 0 && onReset && (
+          {(activeCount > 0 || alwaysShowReset) && onReset && (
             <button
               type="button"
               onClick={onReset}
-              title={resetLabel}
-              className="inline-flex items-center gap-1.5 py-1.5 px-3 rounded-xl text-xs font-bold text-rose-600 bg-rose-50 border border-rose-100 hover:bg-rose-500 hover:text-white hover:border-rose-500 hover:shadow-md hover:shadow-rose-500/25 active:scale-95 transition-all duration-200 cursor-pointer"
+              title={activeCount > 0 ? resetLabel : 'لا توجد فلاتر نشطة — كل النتائج معروضة'}
+              className={`inline-flex items-center gap-1.5 py-1.5 px-3 rounded-xl text-xs font-bold transition-all duration-200 active:scale-95 cursor-pointer ${
+                activeCount > 0
+                  ? 'text-rose-600 bg-rose-50 border border-rose-100 hover:bg-rose-500 hover:text-white hover:border-rose-500 hover:shadow-md hover:shadow-rose-500/25'
+                  : 'text-gray-500 bg-gray-50 border border-gray-200 hover:bg-gray-100'
+              }`}
             >
               <FilterX className="w-3.5 h-3.5" />
               {resetLabel}
-              <span className="min-w-[18px] h-[18px] px-1 flex items-center justify-center rounded-full bg-rose-500 text-white text-[9.5px] font-bold shadow-sm">
-                {activeCount}
-              </span>
+              {activeCount > 0 && (
+                <span className="min-w-[18px] h-[18px] px-1 flex items-center justify-center rounded-full bg-rose-500 text-white text-[9.5px] font-bold shadow-sm">
+                  {activeCount}
+                </span>
+              )}
             </button>
           )}
         </div>

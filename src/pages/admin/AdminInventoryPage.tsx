@@ -8,6 +8,8 @@ import { useNotification } from '../../contexts/NotificationContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { formatPrice, formatNumber, formatDate, formatDateTime } from '../../utils/formatters';
 import { mergeRestockHistory, addRestockJournalEntry, purchaseSummary } from '../../utils/restockJournal';
+import { playSuccessSound } from '../../utils/soundFeedback';
+
 import { StatCard } from '../../components/ui/StatCard';
 import { ComparisonStatCard } from '../../components/ui/ComparisonStatCard';
 import { DateRangeFilter, DateRange, toLocalDateString } from '../../components/ui/DateRangeFilter';
@@ -266,19 +268,28 @@ export const AdminInventoryPage: React.FC = () => {
           source: 'admin-restock',
         });
         showToast(`تم توريد ${restockQty} ${selectedItem!.unit} لـ ${selectedItem!.name} بتكلفة إجمالية ${Number(restockTotalCost).toLocaleString('en-US')} جنيها`);
+        playSuccessSound();
         setIsRestockModalOpen(false);
         setIsRestockSubmitted(false);
         setRestockErrors({});
         setRestockQty('');
         setRestockTotalCost('');
 
-        // ✅ Auto-sync product stockQuantity for all products linked to this inventory item
+        // ✅ مزامنة تلقائية للمنتجات المرتبطة
         const updatedCount = await syncProductStockAfterRestock(selectedItem!._id);
         if (updatedCount > 0) {
           showToast(`تم تحديث ${updatedCount} منتج مرتبط تلقائياً`, 'info');
         }
 
-        loadInventory();
+        // ✅ فتح تفاصيل الصنف تلقائياً بعد التوريد للتحقق من الرصيد الجديد
+        const freshRes = await inventoryService.listInventory();
+        if (freshRes.success && freshRes.data) {
+          setItems(freshRes.data);
+          const fresh = freshRes.data.find((i: InventoryItem) => i._id === selectedItem!._id);
+          if (fresh) setViewingItem(fresh);
+        } else {
+          loadInventory();
+        }
       }
     } catch (err) {
       showError(err);
@@ -1109,47 +1120,48 @@ return (
                 return (
                   <div className="sm:col-span-2 space-y-2 min-w-0">
                     <span className="text-[10px] text-gray-400 font-bold block">
-                      📈 تاريخ الأسعار والتوريد ({formatNumber(history.length)} توريد)
+                      📈 سجل التوريدات والأسعار ({formatNumber(history.length)} عملية — الأحدث أولاً)
                     </span>
-                    {history.map((entry, idx) => {
-                      const older = history[idx + 1];
-                      const priceChanged =
-                        entry.unitCost !== undefined &&
-                        older?.unitCost !== undefined &&
-                        Math.abs(entry.unitCost - older.unitCost) > 0.009;
-                      return (
-                        <div key={entry.id} className="bg-white border border-gray-200 rounded-xl px-3 py-2.5 space-y-1.5 min-w-0">
-                          {/* السطر ١: نوع العملية + التاريخ */}
-                          <div className="flex items-start justify-between gap-2 flex-wrap text-xs">
-                            <span className="font-bold text-gray-900 min-w-0">
-                              ✅ توريد <span className="font-mono text-emerald-700">+{formatNumber(entry.qty)}</span> {viewingItem.unit}
-                            </span>
-                            <span className="font-mono text-[10px] text-gray-500 whitespace-nowrap">
-                              {formatDateTime(new Date(entry.dateMs))}
+                  {history.map((entry, idx) => {
+                    const older = history[idx + 1];
+                    const priceChanged =
+                      entry.unitCost !== undefined &&
+                      older?.unitCost !== undefined &&
+                      Math.abs(entry.unitCost - older.unitCost) > 0.009;
+                    const priceWentDown = priceChanged && (entry.unitCost as number) < (older!.unitCost as number);
+                    return (
+                      <div key={entry.id} className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+                        {/* الرأس: العملية + التاريخ */}
+                        <div className="flex items-center justify-between gap-2 px-3 py-2 bg-[#faf8f5] border-b border-gray-100">
+                          <span className="text-xs font-bold text-gray-900">
+                            ✅ توريد <span className="font-mono text-emerald-700">+{formatNumber(entry.qty)}</span> {viewingItem.unit}
+                          </span>
+                          <span className="font-mono text-[10px] text-gray-500 whitespace-nowrap">
+                            🕒 {formatDateTime(new Date(entry.dateMs))}
+                          </span>
+                        </div>
+
+                        {/* خلايا واضحة بعناوين منفصلة — بدل السطور المدمجة الملبكة */}
+                        <div className="grid grid-cols-3 gap-2 px-3 py-2.5">
+                          <div>
+                            <span className="text-[9px] text-gray-400 font-bold block mb-0.5">سعر الوحدة</span>
+                            <span className="text-xs font-bold font-mono text-[#2e5b9f]">
+                              {entry.unitCost !== undefined ? formatPrice(entry.unitCost) : '—'}
                             </span>
                           </div>
-                          {/* السطر ٢: سعر الوحدة + إجمالي الفاتورة */}
-                          <div className="flex items-center gap-x-4 gap-y-1 flex-wrap font-mono text-[11px]">
-                            <span className="text-gray-600 whitespace-nowrap">
-                              سعر الوحدة:{' '}
-                              <span className="font-bold text-[#2e5b9f]">{entry.unitCost !== undefined ? formatPrice(entry.unitCost) : '—'}</span>
-                              {priceChanged && (
-                                <span className="font-sans font-bold text-amber-700">
-                                  {' '}(بدلاً من {formatPrice(older!.unitCost!)})
-                                </span>
-                              )}
+                          <div>
+                            <span className="text-[9px] text-gray-400 font-bold block mb-0.5">إجمالي الفاتورة</span>
+                            <span className="text-xs font-bold font-mono text-gray-900">
+                              {entry.totalCost !== undefined ? formatPrice(entry.totalCost) : '—'}
                             </span>
-                            {entry.totalCost !== undefined && (
-                              <span className="text-gray-500 whitespace-nowrap">إجمالي الفاتورة {formatPrice(entry.totalCost)}</span>
-                            )}
                           </div>
-                          {/* السطر ٣: بواسطة + المورد */}
-                          <div className="flex items-center justify-between gap-2 flex-wrap text-[10px] text-gray-500">
-                            <span className="inline-flex items-center gap-1 min-w-0">
-                              بواسطة <span className="font-bold text-gray-800 truncate">{entry.by}</span>
+                          <div className="min-w-0">
+                            <span className="text-[9px] text-gray-400 font-bold block mb-0.5">بواسطة</span>
+                            <span className="flex items-center gap-1 min-w-0">
+                              <span className="text-[11px] font-bold text-gray-800 truncate">{entry.by}</span>
                               {entry.byRole && (
                                 <span
-                                  className={`inline-flex items-center px-1.5 py-px rounded-full font-bold border shrink-0 ${
+                                  className={`inline-flex items-center px-1.5 py-px rounded-full text-[9px] font-bold border shrink-0 ${
                                     entry.byRole === 'admin'
                                       ? 'bg-blue-50 text-blue-700 border-blue-200'
                                       : 'bg-emerald-50 text-emerald-700 border-emerald-200'
@@ -1159,13 +1171,33 @@ return (
                                 </span>
                               )}
                             </span>
-                            {entry.supplier && (
-                              <span className="font-bold text-gray-600 whitespace-nowrap">🏷️ مورد: {entry.supplier}</span>
-                            )}
                           </div>
                         </div>
-                      );
-                    })}
+
+                        {/* شارات توضيحية: تغيّر السعر + المورد */}
+                        {(priceChanged || entry.supplier) && (
+                          <div className="flex flex-wrap items-center gap-1.5 px-3 pb-2.5">
+                            {priceChanged && (
+                              <span
+                                className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                                  priceWentDown
+                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                    : 'bg-amber-50 text-amber-800 border-amber-200'
+                                }`}
+                              >
+                                {priceWentDown ? '📉' : '📈'} السعر {priceWentDown ? 'أقل' : 'أعلى'} من السابق: {formatPrice(older!.unitCost!)} ← {formatPrice(entry.unitCost!)}
+                              </span>
+                            )}
+                            {entry.supplier && (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-bold text-gray-600 bg-gray-50 border border-gray-200 px-2 py-0.5 rounded-full">
+                                🏷️ مورد: {entry.supplier}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                   </div>
                 );
               })()}

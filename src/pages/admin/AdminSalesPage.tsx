@@ -245,6 +245,8 @@ export const AdminSalesPage: React.FC = () => {
         onPeriodChange={(id) => { setStatusFilter(id as typeof statusFilter); setCurrentPage(1); }}
         resultCount={filteredOrders.length}
         resultLabel="فاتورة مسجلة"
+        alwaysShowReset
+        resetLabel="مسح التصفية"
         activeCount={
           (searchQuery ? 1 : 0) +
           (statusFilter !== 'all' ? 1 : 0) +

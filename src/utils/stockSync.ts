@@ -128,6 +128,53 @@ export async function syncProductStockAfterRestock(inventoryItemId: string): Pro
 }
 
 /**
+ * ✅ إتمام عملية شراء/توريد مضمونة — تُستخدم من كل شاشات المشتريات:
+ * 1) بتتحقق إن رصيد الخام زاد فعلاً بعد تسجيل قيد الشراء —
+ *    لو الـ Backend مازودش الرصيد تلقائياً من القيد، بتعمل restock صريح كخطة بديلة.
+ * 2) بتزامن أرصدة المنتجات المرتبطة بالخام عبر الوصفات فوراً —
+ *    فالمنتجات النافدة بتفتح مباشرة في الكاشير والمنيو.
+ */
+export async function ensurePurchaseRestockAndSync(params: {
+  itemId: string;
+  /** رصيد الخام قبل التسجيل — null لو مش معروف */
+  qtyBefore: number | null;
+  /** الكمية المشتراة */
+  addQty: number;
+  /** سعر تكلفة الوحدة للفاتورة */
+  unitCost?: number;
+}): Promise<{ restocked: boolean; updatedProducts: number; newQty: number | null }> {
+  const { itemId, qtyBefore, addQty, unitCost } = params;
+  let restocked = false;
+  let newQty: number | null = null;
+
+  try {
+    const freshRes = await inventoryService.listInventory();
+    const fresh =
+      freshRes.success && freshRes.data
+        ? freshRes.data.find((i: any) => i._id === itemId)
+        : undefined;
+    newQty = fresh ? Number(fresh.quantity) : null;
+
+    if (newQty !== null && qtyBefore !== null && newQty <= qtyBefore) {
+      // ⚠️ الـ Backend مازودش الرصيد من قيد الشراء → restock صريح كخطة بديلة
+      const res = await inventoryService.restockItem(itemId, addQty, unitCost);
+      if (res.success) {
+        restocked = true;
+        newQty = Number(res.data?.quantity ?? newQty + addQty);
+      }
+    } else if (newQty !== null && qtyBefore !== null && newQty > qtyBefore) {
+      // ✅ الـ Backend زوّد الرصيد تلقائياً من القيد
+      restocked = true;
+    }
+  } catch {
+    // فشل التحقق — نكمل بالمزامنة على أي حال
+  }
+
+  const updatedProducts = await syncProductStockAfterRestock(itemId);
+  return { restocked, updatedProducts, newQty };
+}
+
+/**
  * Synchronize all products' stock levels with the current inventory — via recipes ONLY.
  * المنتجات بدون وصفة صالحة لا يتم لمسها إطلاقًا (رصيدها يدوي للأدمن).
  */

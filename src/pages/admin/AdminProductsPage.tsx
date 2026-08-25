@@ -4,6 +4,7 @@ import { inventoryService } from '../../services/opsService';
 import { Product, Category, InventoryItem } from '../../types';
 import { useNotification } from '../../contexts/NotificationContext';
 import { formatPrice, formatNumber } from '../../utils/formatters';
+import { productStockState } from '../../utils/stockStatus';
 import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
@@ -30,12 +31,19 @@ import {
   CheckCircle2,
 } from 'lucide-react';
 
+/** تحويل الكمية لأصغر وحدة أساس (GRAM / ML / PIECE) لحساب دقيق */
+const getQtyInBase = (value: number, unit: string): number => {
+  const u = (unit || '').toUpperCase();
+  if (u === 'KG' || u === 'LITER') return value * 1000;
+  return value; // GRAM, ML, PIECE
+};
+
 export const AdminProductsPage: React.FC = () => {
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [activeCategory, setActiveCategory] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [stockFilter, setStockFilter] = useState<'all' | 'in' | 'out'>('all');
+  const [stockFilter, setStockFilter] = useState<'all' | 'in' | 'low' | 'out'>('all');
   const [dateFrom, setDateFrom] = useState<string>('');
   const [dateTo, setDateTo] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -49,7 +57,7 @@ export const AdminProductsPage: React.FC = () => {
   // Category Modal
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
   const [categoryForm, setCategoryForm] = useState({ name: '', description: '' });
-  const [categoryErrors, setCategoryErrors] = useState<{ name?: string }>({});
+  const [categoryErrors, setCategoryErrors] = useState<{ name?: string; description?: string }>({});
   const [isAddingCategory, setIsAddingCategory] = useState(false);
   const [isCategoryFormSubmitted, setIsCategoryFormSubmitted] = useState(false);
 
@@ -97,43 +105,32 @@ export const AdminProductsPage: React.FC = () => {
 
   // Compute how many product units we can make from the linked raw inventory
   // Eg: linked "Coffee beans" with 2 LITER current and consumeQty 0.02 per cup => 100 cups available.
-  // Compute how many product units we can make from the linked raw inventory
   // Handles unit conversion to get accurate cup/piece calculation
-  const computeAvailableFromInventory = (rows: { inventoryItem: string; consumeQty: string; consumeUnit: string }[]): number | null => {
+  // ⚠️ القاعدة: العدد النهائي = أقل خامة — الخامة اللي رصيدها يكفي أقل عدد هي اللي بتحدد السقف
+  const computeAvailability = (rows: { inventoryItem: string; consumeQty: string; consumeUnit: string }[]): number | null => {
     if (!rows || rows.length === 0) return null;
-    let minAvailable = Infinity;
 
-    // Helper to get base quantity in smallest unit (GRAM / ML / PIECE)
-    const getQtyInBase = (value: number, unit: string): number => {
-      const u = unit.toUpperCase();
-      if (u === 'KG' || u === 'LITER') return value * 1000;
-      return value; // GRAM, ML, PIECE
-    };
+    let minAvailable = Infinity;
 
     for (const row of rows) {
       const qty = Number(row.consumeQty);
       if (!row.inventoryItem || !qty || qty <= 0) continue;
       const inv = inventoryItems.find((i) => i._id === row.inventoryItem);
-      if (!inv || inv.quantity <= 0) {
-        minAvailable = 0;
-        continue;
-      }
 
       // Convert both inventory quantity and consume quantity to base units
-      const invBase = getQtyInBase(inv.quantity, inv.unit);
+      const invBase = inv ? getQtyInBase(inv.quantity, inv.unit) : 0;
       const consumeBase = getQtyInBase(qty, row.consumeUnit || 'GRAM');
-
       if (consumeBase <= 0) continue;
 
-      // Calculate how many units we can make
-      const unitsForThis = Math.floor(invBase / consumeBase);
-      minAvailable = Math.min(minAvailable, unitsForThis);
+      // Calculate how many units this ingredient allows
+      minAvailable = Math.min(minAvailable, Math.floor(invBase / consumeBase));
     }
+
     return Number.isFinite(minAvailable) ? minAvailable : null;
   };
 
   const updateComputedAvailable = (rows: { inventoryItem: string; consumeQty: string; consumeUnit: string }[]) => {
-    setComputedAvailable(computeAvailableFromInventory(rows));
+    setComputedAvailable(computeAvailability(rows));
   };
 
   const handleRecipeRowChange = (idx: number, field: 'inventoryItem' | 'consumeQty' | 'consumeUnit', value: string) => {
@@ -164,14 +161,18 @@ export const AdminProductsPage: React.FC = () => {
 
   // Automatically sync computed availability with stock quantity form field
   useEffect(() => {
-    const calculated = recipeData?.availableProductQty !== undefined && recipeData?.availableProductQty !== null
-      ? recipeData.availableProductQty
-      : computedAvailable;
+    if (recipeRows.length === 0) return; // منتج بدون خامات — الرصيد يدوي، متلمسوش
+    // ✅ الأولوية للحساب المحلي الحي (computedAvailable) — بيتحدث فوراً مع كل تعديل
+    // في كميات الاستهلاك. قيمة الـ Backend (recipeData) بديل احتياطي بس لو الحساب المحلي
+    // مش متاح، بدل ما كانت بتعلّق الحقل على قيمة قديمة محفوظة وقت فتح النافذة.
+    const calculated = computedAvailable !== null && computedAvailable !== undefined
+      ? computedAvailable
+      : recipeData?.availableProductQty;
 
     if (calculated !== null && calculated !== undefined) {
       setFormData((prev) => ({ ...prev, stockQuantity: String(calculated) }));
     }
-  }, [computedAvailable, recipeData]);
+  }, [computedAvailable, recipeData, recipeRows.length]);
 
   const handleFilterReset = () => {
     setSearchQuery('');
@@ -265,10 +266,16 @@ export const AdminProductsPage: React.FC = () => {
   const handleCreateCategory = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsCategoryFormSubmitted(true);
-    const errors: { name?: string } = {};
+    const errors: { name?: string; description?: string } = {};
 
     if (!categoryForm.name.trim()) {
       errors.name = 'اسم التصنيف مطلوب';
+    }
+    // ✅ وصف التصنيف إجباري — برسالة واضحة توضح المطلوب
+    if (!categoryForm.description.trim()) {
+      errors.description = 'وصف التصنيف مطلوب — اكتب سطراً يوضح ما يحتويه هذا التصنيف (مثال: مشروبات ساخنة زي الشاي والقهوة والأعشاب)';
+    } else if (categoryForm.description.trim().length < 5) {
+      errors.description = `الوصف قصير جداً (${categoryForm.description.trim().length} حرف) — اكتب 5 أحرف على الأقل لتوضيح محتوى التصنيف`;
     }
 
     if (Object.keys(errors).length > 0) {
@@ -383,7 +390,43 @@ export const AdminProductsPage: React.FC = () => {
         const res = await productService.updateProduct(editingProduct._id, data);
         if (res.success) {
           savedProductId = editingProduct._id;
-          showToast('تم تحديث المنتج بنجاح');
+
+          // ✅ حفظ الوصفة أيضاً عند التعديل — من غير كده كميات الاستهلاك الجديدة
+          // مش بتتسجل على الـ Backend، وأي مزامنة مخزون بعدها (توريد/شراء)
+          // بترجّع كمية المخزون المتاحة لعدد الأكواب القديم.
+          try {
+            const existingRecipes = await recipeService.listRecipes();
+            const current = Array.isArray(existingRecipes?.data) ? existingRecipes.data : [];
+            const existingRecipe = current.find(
+              (rec) => (typeof rec.product === 'string' ? rec.product : rec.product._id) === savedProductId
+            );
+
+            if (validRows.length > 0) {
+              const ingredients = validRows.map((r) => ({
+                inventoryItem: r.inventoryItem,
+                inputQuantity: Number(r.consumeQty),
+                inputUnit: r.consumeUnit as 'KG' | 'GRAM' | 'LITER' | 'ML' | 'PIECE',
+                outputQuantity: 1,
+              }));
+              if (existingRecipe) {
+                await recipeService.updateRecipe(existingRecipe._id, { ingredients });
+              } else {
+                await recipeService.createRecipe({ product: savedProductId, ingredients, isActive: true });
+              }
+              showToast('تم تحديث المنتج والوصفة — كمية المخزون المتاحة اتحدثت بعدد الأكواب الجديد');
+            } else if (existingRecipe) {
+              // شيل كل الخامات أثناء التعديل → نمسح الوصفة عشان الرصيد يبقى يدوي
+              // والمزامنة مترجّعش الرقم القديم
+              await recipeService.deleteRecipe(existingRecipe._id);
+              showToast('تم تحديث المنتج — الرصيد بقى يدوياً بدون خامات مرتبطة', 'info');
+            } else {
+              showToast('تم تحديث المنتج بنجاح');
+            }
+          } catch (recipeErr) {
+            showError(recipeErr);
+            showToast('تم تحديث المنتج لكن تعذّر حفظ الوصفة (الخامات)', 'info');
+          }
+
           setIsModalOpen(false);
           loadData();
         }
@@ -438,8 +481,9 @@ export const AdminProductsPage: React.FC = () => {
       (p.description || '').toLowerCase().includes(searchQuery.toLowerCase());
 
     let matchesStock = true;
-    if (stockFilter === 'in') matchesStock = p.stockQuantity > 0;
-    if (stockFilter === 'out') matchesStock = p.stockQuantity <= 0;
+    if (stockFilter === 'in') matchesStock = productStockState(p) === 'available';
+    if (stockFilter === 'low') matchesStock = productStockState(p) === 'low';
+    if (stockFilter === 'out') matchesStock = productStockState(p) === 'out';
 
     // ✅ نطاق التاريخ المخصص — على تاريخ إضافة / تحديث المنتج
     let matchesDate = true;
@@ -456,8 +500,9 @@ export const AdminProductsPage: React.FC = () => {
     return matchesCat && matchesSearch && matchesStock && matchesDate;
   });
 
-  const inStockCount = products.filter((p) => p.stockQuantity > 0).length;
-  const outOfStockCount = products.filter((p) => p.stockQuantity <= 0).length;
+  const inStockCount = products.filter((p) => productStockState(p) === 'available').length;
+  const lowStockCount = products.filter((p) => productStockState(p) === 'low').length;
+  const outOfStockCount = products.filter((p) => productStockState(p) === 'out').length;
 
   return (
     <div className="space-y-6 text-right font-sans">
@@ -504,7 +549,8 @@ export const AdminProductsPage: React.FC = () => {
         periods={[
           { id: 'all', label: `الكل (${formatNumber(products.length)})` },
           { id: 'in', label: `متوفر (${formatNumber(inStockCount)})` },
-          { id: 'out', label: `نافد (${formatNumber(outOfStockCount)})` },
+          { id: 'low', label: `منخفض (${formatNumber(lowStockCount)})` },
+          { id: 'out', label: `نافذ (${formatNumber(outOfStockCount)})` },
         ]}
         activePeriod={stockFilter}
         onPeriodChange={(id) => setStockFilter(id as typeof stockFilter)}
@@ -584,6 +630,7 @@ export const AdminProductsPage: React.FC = () => {
               {filteredProducts.map((prod) => {
                 const catName =
                   typeof prod.category === 'object' ? prod.category.name : 'عام';
+                const state = productStockState(prod);
                 return (
                   <div
                     key={prod._id}
@@ -609,20 +656,10 @@ export const AdminProductsPage: React.FC = () => {
                         </div>
                       </div>
                       <Badge
-                        variant={
-                          prod.stockQuantity > 10
-                            ? 'available'
-                            : prod.stockQuantity > 0
-                            ? 'low'
-                            : 'out'
-                        }
+                        variant={state === 'available' ? 'available' : state === 'low' ? 'low' : 'out'}
                         size="sm"
                       >
-                        {prod.stockQuantity > 10
-                          ? 'متوفر'
-                          : prod.stockQuantity > 0
-                          ? 'منخفض'
-                          : 'نفذ'}
+                        {state === 'available' ? 'متوفر' : state === 'low' ? 'منخفض' : 'نفذ'}
                       </Badge>
                     </div>
 
@@ -692,6 +729,7 @@ export const AdminProductsPage: React.FC = () => {
                   {filteredProducts.map((prod) => {
                     const catName =
                       typeof prod.category === 'object' ? prod.category.name : 'عام';
+                    const state = productStockState(prod);
                     return (
                       <tr
                         key={prod._id}
@@ -736,20 +774,10 @@ export const AdminProductsPage: React.FC = () => {
 
                         <td className="py-3 px-3">
                           <Badge
-                            variant={
-                              prod.stockQuantity > 10
-                                ? 'available'
-                                : prod.stockQuantity > 0
-                                ? 'low'
-                                : 'out'
-                            }
+                            variant={state === 'available' ? 'available' : state === 'low' ? 'low' : 'out'}
                             size="sm"
                           >
-                            {prod.stockQuantity > 10
-                              ? 'متوفر'
-                              : prod.stockQuantity > 0
-                              ? 'منخفض'
-                              : 'نفذ المخزون'}
+                            {state === 'available' ? 'متوفر' : state === 'low' ? 'منخفض' : 'نفذ المخزون'}
                           </Badge>
                         </td>
 
@@ -837,20 +865,22 @@ export const AdminProductsPage: React.FC = () => {
               <div className="p-3 bg-white rounded-xl border border-gray-200">
                 <span className="text-[10px] text-gray-400 font-bold block">الحالة</span>
                 <Badge
-                  variant={
-                    (recipeData?.availableProductQty ?? viewingProduct.stockQuantity) > 10
-                      ? 'available'
-                      : (recipeData?.availableProductQty ?? viewingProduct.stockQuantity) > 0
-                      ? 'low'
-                      : 'out'
-                  }
+                  variant={(() => {
+                    const s = productStockState({
+                      inStock: viewingProduct.inStock,
+                      stockQuantity: recipeData?.availableProductQty ?? viewingProduct.stockQuantity,
+                    });
+                    return s === 'available' ? 'available' : s === 'low' ? 'low' : 'out';
+                  })()}
                   size="sm"
                 >
-                  {(recipeData?.availableProductQty ?? viewingProduct.stockQuantity) > 10
-                    ? 'متوفر'
-                    : (recipeData?.availableProductQty ?? viewingProduct.stockQuantity) > 0
-                    ? 'منخفض'
-                    : 'نفذ المخزون'}
+                  {(() => {
+                    const s = productStockState({
+                      inStock: viewingProduct.inStock,
+                      stockQuantity: recipeData?.availableProductQty ?? viewingProduct.stockQuantity,
+                    });
+                    return s === 'available' ? 'متوفر' : s === 'low' ? 'منخفض' : 'نفذ المخزون';
+                  })()}
                 </Badge>
               </div>
             </div>
@@ -944,10 +974,8 @@ export const AdminProductsPage: React.FC = () => {
             error={formErrors.stockQuantity}
             helperText={
               (() => {
-                const backendAvailable = recipeData?.availableProductQty;
-                const frontendAvailable = computedAvailable;
                 if (recipeRows.length > 0) {
-                  return `🔒 هذا الحقل مغلق ومحمي. يتم حساب كمية الإنتاج المتاحة تلقائياً (${frontendAvailable !== null ? frontendAvailable : 0} كوب) بناءً على أرصدة خامات المخزن الحالية.`;
+                  return `🔒 هذا الحقل مغلق ومحمي. يتم حساب كمية الإنتاج المتاحة تلقائياً (${computedAvailable !== null ? formatNumber(computedAvailable) : 0} كوب) بناءً على أرصدة خامات المخزن الحالية وكميات الاستهلاك — وبيتحدث فوراً مع أي تعديل.`;
                 }
                 return 'اربط خامات المخزون بالأسفل لحساب الكمية تلقائياً من الخامات، أو اكتب الرصيد يدوياً للمنتجات الجاهزة.';
               })()
@@ -971,16 +999,22 @@ export const AdminProductsPage: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => {
-                    const qty = recipeData?.availableProductQty !== undefined && recipeData?.availableProductQty !== null
-                      ? recipeData.availableProductQty
-                      : computedAvailable;
+                    // ✅ نفس منطق الحقل: القيمة الحية المحلية أولاً — بتتحدث مع كل تعديل
+                    const qty = computedAvailable !== null && computedAvailable !== undefined
+                      ? computedAvailable
+                      : recipeData?.availableProductQty;
                     setFormData((prev) => ({ ...prev, stockQuantity: String(qty) }));
                     if (formErrors.stockQuantity) setFormErrors({ ...formErrors, stockQuantity: undefined });
                   }}
                   className="inline-flex items-center gap-1 bg-[#2e5b9f] hover:bg-[#244b85] text-white font-bold text-[11px] py-1.5 px-3 rounded-xl transition cursor-pointer shadow-2xs"
                 >
                   <Calculator className="w-3.5 h-3.5" />
-                  <span>تطبيق المحسوب ({recipeData?.availableProductQty !== undefined && recipeData?.availableProductQty !== null ? recipeData.availableProductQty : computedAvailable})</span>
+                  <span>تطبيق المحسوب ({(() => {
+                    const qty = computedAvailable !== null && computedAvailable !== undefined
+                      ? computedAvailable
+                      : recipeData?.availableProductQty;
+                    return qty ?? 0;
+                  })()})</span>
                 </button>
               )}
             </div>
@@ -1211,16 +1245,31 @@ export const AdminProductsPage: React.FC = () => {
           />
 
           <div>
-            <label className="block text-xs font-semibold text-gray-700 mb-1.5">
-              الوصف (اختياري)
+            <label className={`block text-xs font-bold mb-1.5 ${categoryErrors.description && isCategoryFormSubmitted ? 'text-rose-600' : 'text-gray-700'}`}>
+              وصف التصنيف *
+              <span className="text-gray-400 font-normal"> (إجباري — يوضح محتوى التصنيف)</span>
             </label>
             <textarea
               rows={2}
-              placeholder="وصف مختصر للتصنيف..."
+              placeholder="مثال: مشروبات ساخنة زي الشاي، القهوة، الأعشاب..."
               value={categoryForm.description}
-              onChange={(e) => setCategoryForm({ ...categoryForm, description: e.target.value })}
-              className="w-full bg-[#faf8f5] hover:bg-white focus:bg-white border border-gray-200 rounded-xl p-3 text-xs outline-none focus:ring-2 focus:ring-[#2e5b9f]/20 focus:border-[#2e5b9f]"
+              onChange={(e) => {
+                setCategoryForm({ ...categoryForm, description: e.target.value });
+                if (categoryErrors.description) setCategoryErrors({ ...categoryErrors, description: undefined });
+              }}
+              className={`w-full bg-[#faf8f5] hover:bg-white focus:bg-white border rounded-xl p-3 text-xs outline-none focus:ring-2 focus:ring-[#2e5b9f]/20 focus:border-[#2e5b9f] ${
+                categoryErrors.description && isCategoryFormSubmitted
+                  ? 'border-rose-500 bg-rose-50/30'
+                  : 'border-gray-200'
+              }`}
+              required
             />
+            {categoryErrors.description && isCategoryFormSubmitted && (
+              <p className="flex items-start gap-1 text-[11px] font-bold text-rose-600 mt-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-rose-600 inline-block shrink-0 mt-1" />
+                {categoryErrors.description}
+              </p>
+            )}
           </div>
 
           <div className="pt-4 flex items-center justify-end gap-2 border-t border-gray-100">

@@ -3,6 +3,7 @@ import { inventoryService } from '../services/opsService';
 import { InventoryItem } from '../types';
 import { useNotification } from '../contexts/NotificationContext';
 import { isStockLow, isStockOut } from '../utils/stockStatus';
+import { playAlertSound } from '../utils/soundFeedback';
 
 interface InventoryState {
   items: InventoryItem[];
@@ -43,6 +44,7 @@ export const useInventorySync = (pollInterval = 30000) => {
         lowStock.forEach(item => {
           if (!notifiedLowStock.current.has(item._id)) {
             notifiedLowStock.current.add(item._id);
+            playAlertSound('low');
             showToast(`⚠️ مخزون منخفض: ${item.name} (${item.quantity} ${item.unit} متبقي)`, 'info');
           }
         });
@@ -51,11 +53,18 @@ export const useInventorySync = (pollInterval = 30000) => {
         outOfStock.forEach(item => {
           if (!notifiedOutOfStock.current.has(item._id)) {
             notifiedOutOfStock.current.add(item._id);
+            playAlertSound('out');
             showToast(`🚫 نفذ المخزون: ${item.name} - يحتاج توريد فوري`, 'error');
           }
         });
 
-        // Reset notifications when items are restocked
+        // Reset notifications: لما صنف يتوّرد ويرجع رصيده فوق حد التنبيه — يُسمح بتنبيهه مرة تانية لو نفد تاني
+        lowStock.forEach(item => {
+          if (!isStockLow(item.quantity, item.minLimit)) notifiedLowStock.current.delete(item._id);
+        });
+        outOfStock.forEach(item => {
+          if (!isStockOut(item.quantity)) notifiedOutOfStock.current.delete(item._id);
+        });
         const currentIds = new Set(items.map(i => i._id));
         notifiedLowStock.current.forEach(id => {
           if (!currentIds.has(id)) notifiedLowStock.current.delete(id);

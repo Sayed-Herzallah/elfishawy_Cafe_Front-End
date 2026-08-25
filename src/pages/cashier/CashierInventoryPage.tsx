@@ -3,7 +3,8 @@ import { inventoryService, expenseService } from '../../services/opsService';
 import { InventoryItem, Expense } from '../../types';
 import { useNotification } from '../../contexts/NotificationContext';
 import { useAuth } from '../../contexts/AuthContext';
-import { syncProductStockAfterRestock } from '../../utils/stockSync';
+import { ensurePurchaseRestockAndSync } from '../../utils/stockSync';
+import { playSuccessSound } from '../../utils/soundFeedback';
 import { addRestockJournalEntry, purchaseSummary } from '../../utils/restockJournal';
 import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
@@ -192,6 +193,8 @@ export const CashierInventoryPage: React.FC = () => {
 
     try {
       setIsSubmitting(true);
+      // 🔍 رصيد الخام قبل التسجيل — عشان نتحقق بعدها إن الرصيد زاد فعلاً
+      const qtyBefore = Number(selectedItem.quantity) || 0;
       // 🧹 اسم/بيان الشراء نظيف واحترافي (مش "تعبئة مخزون" ولا "شراء بضاعة") —
       // بيظهر في المشتريات كاسم المادة المختارة مع الكمية والمورد والفاتورة.
       const supplierTag = purchaseFormData.supplierName
@@ -215,6 +218,7 @@ export const CashierInventoryPage: React.FC = () => {
         });
 
       if (expRes.success) {
+        playSuccessSound();
         showToast(`تم توريد ${qty} ${selectedItem.unit} بنجاح وتسجيل المصروفات بقيمة ${total} جنيها`);
         setIsPurchaseModalOpen(false);
 
@@ -230,10 +234,16 @@ export const CashierInventoryPage: React.FC = () => {
           source: 'cashier-purchase',
         });
 
-        // ✅ Auto-sync product stockQuantity for all products linked to this inventory item
-        const updatedCount = await syncProductStockAfterRestock(selectedItem._id);
-        if (updatedCount > 0) {
-          showToast(`تم تحديث ${updatedCount} منتج مرتبط تلقائياً`, 'info');
+        // ✅ مضمون التوريد: نتأكد إن رصيد الخام زاد فعلاً (لو الـ Backend مازودش من
+        // القيد بنعمل restock صريح) — وبعدها نزامن المنتجات المرتبطة فوراً
+        const { updatedProducts } = await ensurePurchaseRestockAndSync({
+          itemId: selectedItem._id,
+          qtyBefore,
+          addQty: qty,
+          unitCost: qty > 0 ? Number((total / qty).toFixed(2)) : undefined,
+        });
+        if (updatedProducts > 0) {
+          showToast(`🔄 تم تحديث ${updatedProducts} منتج مرتبط وأصبح متاحاً للبيع`, 'info');
         }
 
         refetch();

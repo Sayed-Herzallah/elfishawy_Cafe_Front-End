@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { productService, categoryService } from '../services/catalogService';
 import { orderService } from '../services/opsService';
 import { inventoryService } from '../services/opsService';
@@ -12,6 +12,8 @@ import { LoadingSkeleton } from '../components/ui/LoadingSkeleton';
 import { ConfirmDialog } from '../components/ui/ConfirmDialog';
 import { formatPrice, formatNumber, formatTime } from '../utils/formatters';
 import { toBase } from '../utils/stockSync';
+import { productStockState } from '../utils/stockStatus';
+import { playAlertSound } from '../utils/soundFeedback';
 import {
   Plus,
   Trash2,
@@ -38,6 +40,8 @@ export const CashierPOSPage: React.FC = () => {
   const [categories, setCategories] = useState<Category[]>([]);
   const [activeCategory, setActiveCategory] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
+  // ✅ فلتر حالة التوفر — الكاشير يشوف المنخفض والنافذ بضغطة واحدة
+  const [stockFilter, setStockFilter] = useState<'all' | 'low' | 'out'>('all');
   const [cart, setCart] = useState<CartItem[]>([]);
   const [tableNumber, setTableNumber] = useState<string>('');
   // ✅ Validation أحمر لرقم الطاولة — الحقل يظهر بخطأ واضح لما يتأكد الطلب وهو فاضي
@@ -69,6 +73,37 @@ export const CashierPOSPage: React.FC = () => {
     setAllOrders(completedOrders);
     setRecentOrders(completedOrders.slice(0, 4));
   };
+
+  // 🔔 تنبيه صوتي ومرئي لحظة نفاد أو انخفاض مخزون أي منتج —
+  // بيقارن حالة المنتجات الجديدة باللقطة السابقة بعد كل تحديث (كل ١٥ ثانية أو بعد البيع)
+  const prevStockStates = useRef<Map<string, 'out' | 'low' | 'available'> | null>(null);
+
+  useEffect(() => {
+    if (products.length === 0) return;
+
+    const prev = prevStockStates.current;
+    prevStockStates.current = new Map(
+      products.map((p) => [p._id, productStockState(p)])
+    );
+
+    // أول تحميل — بنسجل الحالة فقط بدون تنبيهات قديمة
+    if (!prev) return;
+
+    products.forEach((product) => {
+      const next = productStockState(product);
+      const before = prev.get(product._id);
+      // منتج جديد مش موجود في اللقطة السابقة — بنسجله فقط بدون تنبيه
+      if (before === undefined || before === next) return;
+
+      if (next === 'out') {
+        playAlertSound('out');
+        showToast(`🚫 نفذ "${product.name}" من المخزن — أصبح نافذاً ولا يمكن بيعه`, 'error');
+      } else if (next === 'low') {
+        playAlertSound('low');
+        showToast(`⚠️ مخزون منخفض: "${product.name}" — تبقي ${formatNumber(product.stockQuantity)} وحدة فقط`, 'info');
+      }
+    });
+  }, [products, showToast]);
 
   const loadData = async () => {
     try {
@@ -281,7 +316,12 @@ export const CashierPOSPage: React.FC = () => {
       searchQuery.trim() === '' ||
       p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       (p.description || '').toLowerCase().includes(searchQuery.toLowerCase());
-    return matchesCat && matchesSearch;
+    // ✅ فلتر حالة التوفر: نافذ / منخفض / الكل
+    const matchesStock =
+      stockFilter === 'all' ||
+      (stockFilter === 'out' && productStockState(p) === 'out') ||
+      (stockFilter === 'low' && productStockState(p) === 'low');
+    return matchesCat && matchesSearch && matchesStock;
   });
 
   // Filter today's orders by drink product name, order ID, or table with specific modes
@@ -565,10 +605,14 @@ export const CashierPOSPage: React.FC = () => {
               />
             </div>
 
-            {/* Category Pills */}
+            {/* Category + Availability Filter Pills */}
             <div className="flex flex-wrap items-center gap-1.5 text-xs">
               <button
-                onClick={() => setActiveCategory('all')}
+                onClick={() => {
+                  setActiveCategory('all');
+                  // ✅ "الكل" بترجّع كل المنتجات فوراً — بتلغي فلتر الحالة كمان
+                  setStockFilter('all');
+                }}
                 className={`py-1.5 px-3 rounded-xl font-bold whitespace-nowrap transition cursor-pointer ${
                   activeCategory === 'all'
                     ? 'bg-[#2e5b9f] text-white shadow-2xs'
@@ -590,6 +634,35 @@ export const CashierPOSPage: React.FC = () => {
                   {cat.name}
                 </button>
               ))}
+
+              <span className="w-px h-5 bg-gray-200 mx-1" aria-hidden />
+
+              {/* فلتر التوفر — أزرار تبديل: الضغط تاني بيلغي التحديد ويرجّع الكل */}
+              <button
+                onClick={() => setStockFilter(stockFilter === 'low' ? 'all' : 'low')}
+                className={`inline-flex items-center gap-1 py-1.5 px-3 rounded-xl font-bold whitespace-nowrap transition cursor-pointer border ${
+                  stockFilter === 'low'
+                    ? 'bg-amber-500 text-white border-amber-500 shadow-2xs'
+                    : 'bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100'
+                }`}
+                title={stockFilter === 'low' ? 'إلغاء التحديد — إظهار كل المنتجات' : 'إظهار المنتجات منخفضة المخزون فقط'}
+              >
+                <AlertTriangle className="w-3 h-3" />
+                منخفض ({products.filter((p) => productStockState(p) === 'low').length})
+              </button>
+
+              <button
+                onClick={() => setStockFilter(stockFilter === 'out' ? 'all' : 'out')}
+                className={`inline-flex items-center gap-1 py-1.5 px-3 rounded-xl font-bold whitespace-nowrap transition cursor-pointer border ${
+                  stockFilter === 'out'
+                    ? 'bg-rose-600 text-white border-rose-600 shadow-2xs'
+                    : 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100'
+                }`}
+                title={stockFilter === 'out' ? 'إلغاء التحديد — إظهار كل المنتجات' : 'إظهار المنتجات النافدة فقط'}
+              >
+                <X className="w-3 h-3" />
+                نافذ ({products.filter((p) => productStockState(p) === 'out').length})
+              </button>
             </div>
           </div>
 
@@ -607,8 +680,9 @@ export const CashierPOSPage: React.FC = () => {
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
               {filteredProducts.map((product) => {
-                const isOutOfStock = !product.inStock || product.stockQuantity <= 0;
-                const isLowStock = !isOutOfStock && product.stockQuantity <= 5;
+                const productState = productStockState(product);
+                const isOutOfStock = productState === 'out';
+                const isLowStock = productState === 'low';
                 const cartQty = cart.find((i) => i.product._id === product._id)?.quantity || 0;
 
                 return (
@@ -669,7 +743,7 @@ export const CashierPOSPage: React.FC = () => {
                         {isOutOfStock ? (
                           <span className="inline-flex items-center gap-1 text-[10px] font-bold text-rose-600 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-md">
                             <X className="w-3 h-3" />
-                            غير متاح
+                            نافذ من المخزن
                           </span>
                         ) : isLowStock ? (
                           <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-md">
