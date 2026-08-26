@@ -1,13 +1,10 @@
 import { productService, recipeService } from '../services/catalogService';
 import { inventoryService } from '../services/opsService';
+import { isStockOut } from './stockStatus';
+import { repairConsumeQty, toBaseQty } from './recipeUnits';
 
 // Helper to convert units to base unit
-export const toBase = (qty: number, unit: string): number => {
-  const u = (unit || '').toUpperCase();
-  if (u === 'KG') return qty * 1000;
-  if (u === 'LITER') return qty * 1000;
-  return qty; // GRAM, ML, PIECE
-};
+export const toBase = (qty: number, unit: string): number => toBaseQty(qty, unit);
 
 /**
  * ⚠️ تمت إزالة "الربط بالأسماء" نهائيًا — كان بيربط المنتج بأي خام اسمه قريب
@@ -61,11 +58,20 @@ const calcRecipeAvailability = (recipe: any, allInventory: any[]): number | null
   let minAvailable = Infinity;
   for (const ing of recipe.ingredients) {
     const ingId = typeof ing.inventoryItem === 'string' ? ing.inventoryItem : ing.inventoryItem?._id;
-    const invItem = allInventory.find((i: any) => i._id === ingId);
-    if (!invItem || invItem.quantity <= 0) return 0;
+    const invItem = allInventory.find((i: any) => String(i._id) === String(ingId));
+    if (!invItem || isStockOut(invItem.quantity)) return 0;
 
-    const inputQtyBase = toBase(ing.inputQuantity || 1, ing.inputUnit || 'KG');
-    const consumePerUnit = inputQtyBase / (ing.outputQuantity || 1);
+    const out = Number(ing.outputQuantity) > 0 ? Number(ing.outputQuantity) : 1;
+    const repaired = repairConsumeQty(
+      Number(ing.inputQuantity) || 0,
+      ing.inputUnit || 'KG',
+      Number(invItem.quantity) || 0,
+      invItem.unit || 'KG',
+      out
+    );
+
+    const inputQtyBase = toBase(repaired.qty, repaired.unit);
+    const consumePerUnit = inputQtyBase / out;
     const invBase = toBase(invItem.quantity, invItem.unit);
     const available = consumePerUnit > 0 ? Math.floor(invBase / consumePerUnit) : Infinity;
     minAvailable = Math.min(minAvailable, available);
@@ -100,7 +106,7 @@ export async function syncProductStockAfterRestock(inventoryItemId: string): Pro
       if (!recipeProductId(recipe)) return false;
       return recipe.ingredients?.some((ing: any) => {
         const ingId = typeof ing.inventoryItem === 'string' ? ing.inventoryItem : ing.inventoryItem?._id;
-        return ingId === inventoryItemId;
+        return String(ingId) === String(inventoryItemId);
       });
     });
 
@@ -114,7 +120,11 @@ export async function syncProductStockAfterRestock(inventoryItemId: string): Pro
       const newQty = calcRecipeAvailability(recipe, allInventory);
       if (newQty === null) continue;
 
-      if (product.stockQuantity !== newQty) {
+      const shouldUpdate =
+        product.stockQuantity !== newQty ||
+        Boolean(product.inStock) !== (newQty > 0);
+
+      if (shouldUpdate) {
         const success = await updateProductStockOnServer(product, newQty);
         if (success) updatedCount++;
       }
@@ -203,7 +213,11 @@ export async function syncAllProductsStock(): Promise<number> {
       const finalQty = calcRecipeAvailability(recipe, allInventory);
       if (finalQty === null) continue;
 
-      if (product.stockQuantity !== finalQty) {
+      const shouldUpdate =
+        product.stockQuantity !== finalQty ||
+        Boolean(product.inStock) !== (finalQty > 0);
+
+      if (shouldUpdate) {
         const success = await updateProductStockOnServer(product, finalQty);
         if (success) updatedCount++;
       }

@@ -146,6 +146,8 @@ export const AdminExpensesPage: React.FC = () => {
 
   useEffect(() => {
     loadData();
+    // 🔄 مزامنة أرصدة المنتجات مع المخزن عند فتح صفحة المشتريات
+    syncAllProductsStock().catch(() => {});
   }, []);
 
   useEffect(() => {

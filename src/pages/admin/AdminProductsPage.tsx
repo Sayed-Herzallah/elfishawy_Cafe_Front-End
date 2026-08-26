@@ -5,6 +5,7 @@ import { Product, Category, InventoryItem } from '../../types';
 import { useNotification } from '../../contexts/NotificationContext';
 import { formatPrice, formatNumber } from '../../utils/formatters';
 import { productStockState } from '../../utils/stockStatus';
+import { normalizeRecipeConsumeQty, toBaseQty, repairConsumeQty } from '../../utils/recipeUnits';
 import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
@@ -32,11 +33,7 @@ import {
 } from 'lucide-react';
 
 /** تحويل الكمية لأصغر وحدة أساس (GRAM / ML / PIECE) لحساب دقيق */
-const getQtyInBase = (value: number, unit: string): number => {
-  const u = (unit || '').toUpperCase();
-  if (u === 'KG' || u === 'LITER') return value * 1000;
-  return value; // GRAM, ML, PIECE
-};
+const getQtyInBase = (value: number, unit: string): number => toBaseQty(value, unit);
 
 export const AdminProductsPage: React.FC = () => {
   const [products, setProducts] = useState<Product[]>([]);
@@ -113,16 +110,17 @@ export const AdminProductsPage: React.FC = () => {
     let minAvailable = Infinity;
 
     for (const row of rows) {
+      const inv = inventoryItems.find((i) => i._id === row.inventoryItem);
       const qty = Number(row.consumeQty);
       if (!row.inventoryItem || !qty || qty <= 0) continue;
-      const inv = inventoryItems.find((i) => i._id === row.inventoryItem);
 
-      // Convert both inventory quantity and consume quantity to base units
       const invBase = inv ? getQtyInBase(inv.quantity, inv.unit) : 0;
-      const consumeBase = getQtyInBase(qty, row.consumeUnit || 'GRAM');
+      const repaired = inv
+        ? repairConsumeQty(qty, row.consumeUnit || 'GRAM', inv.quantity, inv.unit, 1)
+        : { qty, unit: row.consumeUnit || 'GRAM' };
+      const consumeBase = getQtyInBase(repaired.qty, repaired.unit);
       if (consumeBase <= 0) continue;
 
-      // Calculate how many units this ingredient allows
       minAvailable = Math.min(minAvailable, Math.floor(invBase / consumeBase));
     }
 
@@ -231,11 +229,23 @@ export const AdminProductsPage: React.FC = () => {
         });
         // Populate recipe rows from backend
         if (res.data.ingredientDetails && res.data.ingredientDetails.length > 0) {
-          const rows = res.data.ingredientDetails.map((ing: any) => ({
-            inventoryItem: typeof ing.inventoryItem === 'string' ? ing.inventoryItem : ing.inventoryItem._id,
-            consumeQty: String(ing.consumptionPerUnitInBase || 0),
-            consumeUnit: ing.inputUnit || 'KG',
-          }));
+          const rows = res.data.ingredientDetails.map((ing: any) => {
+            const consumeUnit = ing.inputUnit || 'KG';
+            const inv =
+              typeof ing.inventoryItem === 'object' && ing.inventoryItem
+                ? ing.inventoryItem
+                : inventoryItems.find((i) => i._id === ing.inventoryItem);
+            const qty = normalizeRecipeConsumeQty(
+              ing,
+              inv ? Number(inv.quantity) : undefined,
+              inv?.unit
+            );
+            return {
+              inventoryItem: typeof ing.inventoryItem === 'string' ? ing.inventoryItem : ing.inventoryItem._id,
+              consumeQty: String(qty),
+              consumeUnit,
+            };
+          });
           setRecipeRows(rows);
           updateComputedAvailable(rows);
         }
@@ -402,12 +412,19 @@ export const AdminProductsPage: React.FC = () => {
             );
 
             if (validRows.length > 0) {
-              const ingredients = validRows.map((r) => ({
-                inventoryItem: r.inventoryItem,
-                inputQuantity: Number(r.consumeQty),
-                inputUnit: r.consumeUnit as 'KG' | 'GRAM' | 'LITER' | 'ML' | 'PIECE',
-                outputQuantity: 1,
-              }));
+              const ingredients = validRows.map((r) => {
+                const inv = inventoryItems.find((i) => i._id === r.inventoryItem);
+                const rawQty = Number(r.consumeQty);
+                const repaired = inv
+                  ? repairConsumeQty(rawQty, r.consumeUnit, inv.quantity, inv.unit, 1)
+                  : { qty: rawQty, unit: r.consumeUnit };
+                return {
+                  inventoryItem: r.inventoryItem,
+                  inputQuantity: repaired.qty,
+                  inputUnit: repaired.unit as 'KG' | 'GRAM' | 'LITER' | 'ML' | 'PIECE',
+                  outputQuantity: 1,
+                };
+              });
               if (existingRecipe) {
                 await recipeService.updateRecipe(existingRecipe._id, { ingredients });
               } else {
@@ -442,12 +459,19 @@ export const AdminProductsPage: React.FC = () => {
               const existingRecipe = current.find(
                 (rec) => (typeof rec.product === 'string' ? rec.product : rec.product._id) === savedProductId
               );
-              const ingredients = validRows.map((r) => ({
-                inventoryItem: r.inventoryItem,
-                inputQuantity: Number(r.consumeQty),
-                inputUnit: r.consumeUnit as 'KG' | 'GRAM' | 'LITER' | 'ML' | 'PIECE',
-                outputQuantity: 1,
-              }));
+              const ingredients = validRows.map((r) => {
+                const inv = inventoryItems.find((i) => i._id === r.inventoryItem);
+                const rawQty = Number(r.consumeQty);
+                const repaired = inv
+                  ? repairConsumeQty(rawQty, r.consumeUnit, inv.quantity, inv.unit, 1)
+                  : { qty: rawQty, unit: r.consumeUnit };
+                return {
+                  inventoryItem: r.inventoryItem,
+                  inputQuantity: repaired.qty,
+                  inputUnit: repaired.unit as 'KG' | 'GRAM' | 'LITER' | 'ML' | 'PIECE',
+                  outputQuantity: 1,
+                };
+              });
               if (existingRecipe) {
                 await recipeService.updateRecipe(existingRecipe._id, { ingredients });
               } else {
@@ -1045,6 +1069,7 @@ export const AdminProductsPage: React.FC = () => {
                         خامة #{idx + 1}
                       </span>
                     </div>
+                    
                     <button
                       type="button"
                       onClick={() => removeRecipeRow(idx)}

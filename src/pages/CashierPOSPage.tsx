@@ -66,7 +66,18 @@ export const CashierPOSPage: React.FC = () => {
 
   const { showToast, showError } = useNotification();
 
-  const applyProducts = (data: Product[]) => setProducts(data);
+  const applyProducts = (data: Product[]) =>
+    setProducts(
+      data.map((p) => {
+        const recipeQty = p.availableQuantityByRecipe;
+        if (recipeQty === null || recipeQty === undefined) return p;
+        return {
+          ...p,
+          stockQuantity: recipeQty,
+          inStock: recipeQty > 0,
+        };
+      })
+    );
   const applyOrders = (data: Order[]) => {
     // Only allow Completed orders to be visible to the cashier POS view
     const completedOrders = data.filter((o: Order) => o.status === 'completed');
@@ -157,7 +168,9 @@ export const CashierPOSPage: React.FC = () => {
   }, []);
 
   const handleAddToCart = (product: Product) => {
-    if (!product.inStock || product.stockQuantity <= 0) {
+    // ✅ نفس منطق "نافذ" الموحد (≤ 0.01) المستخدم في العرض والفلاتر —
+    // بقايا الكسور (مثل 0.005) مبتكفيش أي وحدة بيع فتُحجب زي ما بتظهر.
+    if (!product.inStock || productStockState(product) === 'out') {
       // ✅ رسالة واضحة عند الضغط على صنف نافذ — الزرار مش معطّل عشان الـclick يوصل هنا
       showToast(`صنف "${product.name}" نافد من المخزن — لا يمكن إضافته للطلب`, 'error');
       return;
